@@ -46,6 +46,14 @@ def get_rotation_matrix(originVector, T_location):
     
     return R_w2c
 
+import numpy as np
+ 
+def list_equal_within_tolerance(list1, list2):
+    array1 = np.array(list1)
+    array2 = np.array(list2)
+    # 使用allclose方法判断两数组是否在指定精度内相等
+    return np.allclose(array1, array2, atol=0.001)
+
 #endregion
 
 class TreeNode:
@@ -143,19 +151,26 @@ def retarget_node(node_a_prev, node_a, node_b):
         node_a_next = node_a.children[0]
         node_a_dir_1 = get_unit_vector(node_a.offset)
         node_a_dir_2 = get_unit_vector(node_a_next.offset)
-        # relative_rotation_matrix_a = R.from_matrix(get_rotation_matrix(node_a_dir_1, node_a_dir_2))
+        if list_equal_within_tolerance(node_a_dir_1, node_a_dir_2) == False:
+            relative_rotation_euler_a = R.from_matrix(get_rotation_matrix(node_a_dir_1, node_a_dir_2)).as_euler('XYZ',degrees=True).tolist()
+        else:
+            relative_rotation_euler_a = [0,0,0]
 
         # B 相对旋转计算
         node_b_next = node_b.children[0]
         node_b_dir_1 = get_unit_vector(node_b.offset)
         node_b_dir_2 = get_unit_vector(node_b_next.offset)
-        # relative_rotation_matrix_b = R.from_matrix(get_rotation_matrix(node_b_dir_1, node_b_dir_2))
+        relative_rotation_euler_b = R.from_matrix(get_rotation_matrix(node_b_dir_1, node_b_dir_2)).as_euler('XYZ',degrees=True).tolist()
 
-        # if relative_rotation_matrix_a != relative_rotation_matrix_b:
-        rotation_bias_matrix = get_rotation_matrix(node_b_dir_2, node_a_dir_2)
-        node_a.retarget = R.from_matrix(rotation_bias_matrix)
-        # else:
-        #     node_a.retarget = R.identity()
+        # print(f"{node_a.name}, {node_a_dir_1.tolist()}, {node_a_dir_2.tolist()}, {relative_rotation_euler_a}, {relative_rotation_euler_b}")
+
+        if list_equal_within_tolerance(relative_rotation_euler_a, relative_rotation_euler_b) == False:
+            print(f"{node_a.name}, Not equal")
+            rotation_bias_matrix = get_rotation_matrix(node_b_dir_2, node_a_dir_2)
+            node_a.retarget = R.from_matrix(rotation_bias_matrix)
+        else:
+            node_a.retarget = R.identity()
+    
 
     # 递归计算
     for i in range(len(node_a.children)):

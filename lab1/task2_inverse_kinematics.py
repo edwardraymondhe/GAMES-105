@@ -53,7 +53,7 @@ def part1_simple(viewer, target_pos):
     """
     完成part1_inverse_kinematics，我们将根节点设在腰部，末端节点设在左手
     """
-    viewer.create_marker(target_pos, [1, 0, 0, 1])
+    marker = viewer.create_marker(target_pos, [1, 0, 0, 1])
     joint_name, joint_parent, joint_initial_position = viewer.get_meta_data()
     meta_data = MetaData(joint_name, joint_parent, joint_initial_position, 'RootJoint', 'lWrist_end')
     joint_position = viewer.get_joint_positions()
@@ -169,7 +169,7 @@ def main():
     
     # part1
     # part1_simple(viewer, np.array([0.5, 0.75, 0.5]))
-    # part1_hard(viewer, np.array([0.5, 0.5, 0.5]))
+    part1_hard(viewer, np.array([0.5, 0.5, 0.5]))
     # part1_animation(viewer, np.array([0.5, 0.5, 0.5]))
     
     # part2

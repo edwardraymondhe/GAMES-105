@@ -89,59 +89,59 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
         for i in range(0, len(path) - 2):
 
             # If RootJoint is considered inside calculation, other parts will follow as well
-            end_path_1_idx = 0
+            path_1_end_idx = 0
             
-            # Within this route, tweak each joint's orientation, for [joint -> end] to point to [joint -> x]
+            # Within this route, tweak each joint's orientation, rotate [joint -> end] -> [joint -> x]
             if i < len(path1):
-                start_path_1_idx = i
+                path_1_start_idx = i
                 
-                # start_name = joint_name[path1[start_path_1_idx]]
-                # end_name = joint_name[path1[end_path_1_idx]]
+                # start_name = joint_name[path1[path_1_start_idx]]
+                # end_name = joint_name[path1[path_1_end_idx]]
                 # print(f"---- Route: {start_name} -> {end_name}")
 
-                vector_curr_end = joint_positions[path1[end_path_1_idx]]    - joint_positions[path1[start_path_1_idx]]
-                vector_curr_target = target_pos                             - joint_positions[path1[start_path_1_idx]]
+                vector_curr_end = joint_positions[path1[path_1_end_idx]]    - joint_positions[path1[path_1_start_idx]]
+                vector_curr_target = target_pos                             - joint_positions[path1[path_1_start_idx]]
 
                 target_end_rotation = R.from_matrix(get_rotation_matrix(vector_curr_end, vector_curr_target))
 
-                for curr_path_idx in range(start_path_1_idx, end_path_1_idx-1, -1):
+                for curr_path_idx in range(path_1_start_idx, path_1_end_idx-1, -1):
                     curr_id = path1[curr_path_idx]
                     child_id = joint_parent[curr_id]
 
-                    # "*" operation in R = dot() method in ndarray matrix
                     joint_orientations[curr_id] = (target_end_rotation * R.from_quat(joint_orientations[curr_id])).as_quat()
                     joint_positions[curr_id] = joint_positions[child_id] + R.from_quat(joint_orientations[child_id]).apply(local_position[curr_id])
 
             else:
-                start_path_2_idx = len(path2) - (i - len(path1)) - 1
-                next_path_2_idx = start_path_2_idx - 1
-                next_path_2_joint_id = path2[next_path_2_idx]
+                path_2_start_idx = len(path2) - (i - len(path1)) - 1
+                path_2_end_idx = len(path2) - 1
 
-                end_path_2_idx = len(path2) - 1
+                # For joints below RootJoint, need child joint to calculate orientation
+                path_2_child_idx = path_2_start_idx - 1
+                path_2_child_joint_id = path2[path_2_child_idx]
 
-                vector_curr_end = joint_positions[path1[end_path_1_idx]]    - joint_positions[next_path_2_joint_id]
-                vector_curr_target = target_pos                             - joint_positions[next_path_2_joint_id]
+                vector_curr_end = joint_positions[path1[path_1_end_idx]]    - joint_positions[path_2_child_joint_id]
+                vector_curr_target = target_pos                             - joint_positions[path_2_child_joint_id]
 
                 target_end_rotation = R.from_matrix(get_rotation_matrix(vector_curr_end, vector_curr_target))
 
                 # Apply matrix on all rest joints on path2
-                for curr_path_idx in range(start_path_2_idx, end_path_2_idx+1):
+                for curr_path_idx in range(path_2_start_idx, path_2_end_idx+1):
                     curr_id = path2[curr_path_idx]
                     child_id = path2[curr_path_idx-1]
 
                     # print(f"{joint_name[curr_id]} -> {joint_name[child_id]}")
 
-                    # "*" operation in R = dot() method in ndarray matrix
+                    # Q_i = R * Q_i
+                    # x_i = x_c - Q_i * l_c
                     joint_orientations[curr_id] = (target_end_rotation * R.from_quat(joint_orientations[curr_id])).as_quat()
                     joint_positions[curr_id] = joint_positions[child_id] - R.from_quat(joint_orientations[curr_id]).apply(local_position[child_id])
 
 
                 # Apply matrix on all rest joints on path1
-                for curr_path_idx in range(len(path1)-1, end_path_1_idx-1, -1):
+                for curr_path_idx in range(len(path1)-1, path_1_end_idx-1, -1):
                     curr_id = path1[curr_path_idx]
                     child_id = joint_parent[curr_id]
 
-                    # "*" operation in R = dot() method in ndarray matrix
                     joint_orientations[curr_id] = (target_end_rotation * R.from_quat(joint_orientations[curr_id])).as_quat()
 
                     if curr_path_idx == len(path1)-1:

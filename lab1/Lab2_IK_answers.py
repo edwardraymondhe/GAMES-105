@@ -45,10 +45,10 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
     
     # Root -> 腰 -> End
     # [0, 1, 2, 13, 15, 17, 19, 21]
-    print(path)
+    # print(path)
     
     # ['RootJoint', 'pelvis_lowerback', 'lowerback_torso', 'lTorso_Clavicle', 'lShoulder', 'lElbow', 'lWrist', 'lWrist_end']
-    print(path_name)
+    # print(path_name)
 
     # 手 -> 腰部上个节点
     # [21, 19, 17, 15, 13, 2, 1]
@@ -59,11 +59,15 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
         path1.append(0)
         path2.pop()
 
+    if 0 not in path:
+        path1 = [item for item in path[::-1]]
+        path2 = []
+
     print(path1)
     
     # 腰部
     # [0]
-    print(path2)
+    # print(path2)
 
     # 计算关节在其父关节的局部旋转与局部坐标
     # FK:
@@ -79,25 +83,23 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
     #     l_i = (parent's orientation)**-1 * (current joint's position - parent's position)
     
     # Find 0 that minimizes [x - f(0) = 0]
-    for t in range(1):
+    for t in range(100):
         
-        local_position = [(R.from_quat(joint_orientations[joint_parent[i]]).inv().apply(joint_positions[i] - joint_positions[joint_parent[i]])) for i in range(len(joint_name))]
-        local_rotation = [(R.from_quat(joint_orientations[joint_parent[i]]).inv() * R.from_quat(joint_orientations[i])) for i in range(len(joint_name))]
+        local_positions = [(R.from_quat(joint_orientations[joint_parent[i]]).inv().apply(joint_positions[i] - joint_positions[joint_parent[i]])) for i in range(len(joint_name))]
+        local_rotations = [(R.from_quat(joint_orientations[joint_parent[i]]).inv() * R.from_quat(joint_orientations[i])) for i in range(len(joint_name))]
 
         # From small -> large route
         # -2: Ignore end joint
-        for i in range(0, len(path) - 2):
+        print("\n")
+        for i in range(0, len(path) - 1):
+            # print("...")
 
             # If RootJoint is considered inside calculation, other parts will follow as well
             path_1_end_idx = 0
-            
+
             # Within this route, tweak each joint's orientation, rotate [joint -> end] -> [joint -> x]
             if i < len(path1):
                 path_1_start_idx = i
-                
-                # start_name = joint_name[path1[path_1_start_idx]]
-                # end_name = joint_name[path1[path_1_end_idx]]
-                # print(f"---- Route: {start_name} -> {end_name}")
 
                 vector_curr_end = joint_positions[path1[path_1_end_idx]]    - joint_positions[path1[path_1_start_idx]]
                 vector_curr_target = target_pos                             - joint_positions[path1[path_1_start_idx]]
@@ -106,10 +108,14 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
 
                 for curr_path_idx in range(path_1_start_idx, path_1_end_idx-1, -1):
                     curr_id = path1[curr_path_idx]
-                    child_id = joint_parent[curr_id]
+                    parent_id = joint_parent[curr_id]
+
+                    # curr_name = joint_name[curr_id]
+                    # parent_name = joint_name[parent_id]
+                    # print(f"---- Route: {parent_id} -> {curr_id}")
 
                     joint_orientations[curr_id] = (target_end_rotation * R.from_quat(joint_orientations[curr_id])).as_quat()
-                    joint_positions[curr_id] = joint_positions[child_id] + R.from_quat(joint_orientations[child_id]).apply(local_position[curr_id])
+                    joint_positions[curr_id] = joint_positions[parent_id] + R.from_quat(joint_orientations[parent_id]).apply(local_positions[curr_id])
 
             else:
                 path_2_start_idx = len(path2) - (i - len(path1)) - 1
@@ -127,37 +133,37 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
                 # Apply matrix on all rest joints on path2
                 for curr_path_idx in range(path_2_start_idx, path_2_end_idx+1):
                     curr_id = path2[curr_path_idx]
-                    child_id = path2[curr_path_idx-1]
+                    parent_id = path2[curr_path_idx-1]
 
                     # print(f"{joint_name[curr_id]} -> {joint_name[child_id]}")
 
                     # Q_i = R * Q_i
                     # x_i = x_c - Q_i * l_c
                     joint_orientations[curr_id] = (target_end_rotation * R.from_quat(joint_orientations[curr_id])).as_quat()
-                    joint_positions[curr_id] = joint_positions[child_id] - R.from_quat(joint_orientations[curr_id]).apply(local_position[child_id])
+                    joint_positions[curr_id] = joint_positions[parent_id] - R.from_quat(joint_orientations[curr_id]).apply(local_positions[parent_id])
 
 
                 # Apply matrix on all rest joints on path1
                 for curr_path_idx in range(len(path1)-1, path_1_end_idx-1, -1):
                     curr_id = path1[curr_path_idx]
-                    child_id = joint_parent[curr_id]
+                    parent_id = joint_parent[curr_id]
 
                     joint_orientations[curr_id] = (target_end_rotation * R.from_quat(joint_orientations[curr_id])).as_quat()
 
                     if curr_path_idx == len(path1)-1:
-                        joint_positions[curr_id] = joint_positions[path2[-1]] - R.from_quat(joint_orientations[curr_id]).apply(local_position[path2[-1]])
+                        joint_positions[curr_id] = joint_positions[path2[-1]] - R.from_quat(joint_orientations[curr_id]).apply(local_positions[path2[-1]])
                     else:
-                        joint_positions[curr_id] = joint_positions[child_id] + R.from_quat(joint_orientations[child_id]).apply(local_position[curr_id])
+                        joint_positions[curr_id] = joint_positions[parent_id] + R.from_quat(joint_orientations[parent_id]).apply(local_positions[curr_id])
 
                 # break
 
         # 获得除path以外的节点索引
         path_other = [x for x in range(len(joint_name)) if x not in path]
         for curr_id in path_other:
-            child_id = joint_parent[curr_id]
-            target_orientation = (R.from_quat(joint_orientations[child_id]) * local_rotation[curr_id]).as_quat()
+            parent_id = joint_parent[curr_id]
+            target_orientation = (R.from_quat(joint_orientations[parent_id]) * local_rotations[curr_id]).as_quat()
             joint_orientations[curr_id] = target_orientation
-            joint_positions[curr_id] = joint_positions[child_id] + R.from_quat(joint_orientations[child_id]).apply(local_position[curr_id])
+            joint_positions[curr_id] = joint_positions[parent_id] + R.from_quat(joint_orientations[parent_id]).apply(local_positions[curr_id])
 
         end_pos = joint_positions[path[-1]]
 
@@ -171,6 +177,12 @@ def part2_inverse_kinematics(meta_data, joint_positions, joint_orientations, rel
     """
     输入lWrist相对于RootJoint前进方向的xz偏移，以及目标高度，IK以外的部分与bvh一致
     """
+    pivot_id = 0
+    rootJoint_pos = joint_positions[pivot_id]
+    rootJoint_pos_additive = rootJoint_pos + R.from_quat(joint_orientations[pivot_id]).apply([relative_x, 0, relative_z])
+    target_pos = np.array([rootJoint_pos_additive[0], target_height, rootJoint_pos_additive[2]])
+
+    joint_positions, joint_orientations = part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, target_pos)
     
     return joint_positions, joint_orientations
 

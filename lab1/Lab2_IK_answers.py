@@ -88,14 +88,14 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
 
         # Tweak from small route to large route
         # 1: Ignore end joint
-        for j in range(1, len(path)):
+        for j in range(1, len(path) - 1):
             # Within this route, tweak each joint's orientation, for [joint -> end] to point to [joint -> x]
             start_path_idx = len(path_name) - j - 1
             end_path_idx = len(path_name) - 1
             start_name = joint_name[path[start_path_idx]]
             end_name = joint_name[path[end_path_idx]]
 
-            print(f"Route: {start_name} -> {end_name}")
+            # print(f"Route: {start_name} -> {end_name}")
 
             vector_curr_end = joint_positions[path[end_path_idx]] - joint_positions[path[start_path_idx]]
             vector_curr_target = target_pos                       - joint_positions[path[start_path_idx]]
@@ -108,8 +108,7 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
 
                 # "*" operation in R = dot() method in ndarray matrix
                 joint_orientations[curr_idx] = (target_end_rotation * R.from_quat(joint_orientations[curr_idx])).as_quat()
-                if curr_idx != 0:
-                    joint_positions[curr_idx] = joint_positions[parent_idx] + R.from_quat(joint_orientations[parent_idx]).apply(local_position[curr_idx])
+                joint_positions[curr_idx] = joint_positions[parent_idx] + R.from_quat(joint_orientations[parent_idx]).apply(local_position[curr_idx])
 
         # 获得除path以外的节点索引
         path_other = [x for x in range(len(joint_name)) if x not in path]

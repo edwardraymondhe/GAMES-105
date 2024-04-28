@@ -42,7 +42,7 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
     joint_name = meta_data.joint_name
     joint_parent = meta_data.joint_parent
     joint_initial_position = meta_data.joint_initial_position
-    path, path_name, path1, path2 = meta_data.get_path_from_root_to_end()
+    path, path_name, path1_raw, path2_raw = meta_data.get_path_from_root_to_end()
     
     # Root -> 腰 -> End
     # [0, 1, 2, 13, 15, 17, 19, 21]
@@ -53,6 +53,13 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
 
     # 手 -> 腰部上个节点
     # [21, 19, 17, 15, 13, 2, 1]
+    # path1 = [item for item in path1_raw[::-1]]
+    path1 = path1_raw.copy()
+    path2 = path2_raw.copy()
+    if path2_raw[-1] == 0:
+        path1.append(0)
+        path2.pop()
+
     print(path1)
     
     # 腰部
@@ -88,30 +95,31 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
 
         # Tweak from small route to large route
         # 1: Ignore end joint
-        for j in range(1, len(path) - 1):
+        for j in range(0, len(path1) - 1):
             # Within this route, tweak each joint's orientation, for [joint -> end] to point to [joint -> x]
-            start_path_idx = len(path_name) - j - 1
-            end_path_idx = len(path_name) - 1
-            start_name = joint_name[path[start_path_idx]]
-            end_name = joint_name[path[end_path_idx]]
+            start_path_idx = j
+            end_path_idx = 0
+            start_name = joint_name[path1[start_path_idx]]
+            end_name = joint_name[path1[end_path_idx]]
 
-            # print(f"Route: {start_name} -> {end_name}")
+            print(f"---- Route: {start_name} -> {end_name}")
 
-            vector_curr_end = joint_positions[path[end_path_idx]] - joint_positions[path[start_path_idx]]
-            vector_curr_target = target_pos                       - joint_positions[path[start_path_idx]]
+            vector_curr_end = joint_positions[path1[end_path_idx]] - joint_positions[path1[start_path_idx]]
+            vector_curr_target = target_pos                       - joint_positions[path1[start_path_idx]]
 
             target_end_rotation = R.from_matrix(get_rotation_matrix(vector_curr_end, vector_curr_target))
 
-            for curr_path_idx in range(start_path_idx, end_path_idx + 1):
-                curr_idx = path[curr_path_idx]
+            for curr_path_idx in range(start_path_idx, end_path_idx-1, -1):
+                curr_idx = path1[curr_path_idx]
                 parent_idx = joint_parent[curr_idx]
+                print(f"{joint_name[curr_idx]} <- {joint_name[parent_idx]}")
 
                 # "*" operation in R = dot() method in ndarray matrix
                 joint_orientations[curr_idx] = (target_end_rotation * R.from_quat(joint_orientations[curr_idx])).as_quat()
                 joint_positions[curr_idx] = joint_positions[parent_idx] + R.from_quat(joint_orientations[parent_idx]).apply(local_position[curr_idx])
 
         # 获得除path以外的节点索引
-        path_other = [x for x in range(len(joint_name)) if x not in path]
+        path_other = [x for x in range(len(joint_name)) if x not in path1]
         for curr_idx in path_other:
             parent_idx = joint_parent[curr_idx]
             target_orientation = (R.from_quat(joint_orientations[parent_idx]) * local_rotation[curr_idx]).as_quat()

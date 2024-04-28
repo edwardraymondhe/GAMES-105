@@ -15,7 +15,7 @@ def get_unit_vector(vector):
 def get_vector_angle(a, b):
     return np.arccos(np.dot(a,b) / (np.linalg.norm(a)*np.linalg.norm(b)))
 
-def get_rotation_matrix(originVector, T_location):
+def get_rotation_matrix_1(originVector, T_location):
     # T_location 是目标向量
     # T_location = np.array((1.0 , 0 ,.0))
     
@@ -42,9 +42,30 @@ def get_rotation_matrix(originVector, T_location):
         [0 ,  0 , 1]
     ))
 
-    R_w2c = I + np.sin(sita)*n_vector_invert + n_vector_invert@(n_vector_invert)*(1-np.cos(sita))
+    # R_w2c = I + np.sin(sita)*n_vector_invert + n_vector_invert@(n_vector_invert)*(1-np.cos(sita))
+    R_w2c = I + np.sin(sita) * n_vector_invert + (1-np.cos(sita)) * n_vector_invert.dot(n_vector_invert)
     
     return R_w2c
+
+def get_rotation_matrix(a, b):
+    a = get_unit_vector(a)
+    b = get_unit_vector(b)
+    u = np.cross(a, b)
+
+    # 计算夹角
+    cos_theta = np.dot(a, b)
+    sin_theta = np.linalg.norm(u)
+
+    skew_symmetric = np.array(
+       [[0,     -u[2],   u[1]],
+        [u[2],  0,      -u[0]],
+        [-u[1], u[0],   0]]
+    )
+
+    r = np.eye(3) + sin_theta * skew_symmetric + (1-cos_theta) * (skew_symmetric.dot(skew_symmetric))
+    
+    return r
+
 
 import numpy as np
  
@@ -166,7 +187,8 @@ def retarget_node(node_a_prev, node_a, node_b):
 
         if list_equal_within_tolerance(relative_rotation_euler_a, relative_rotation_euler_b) == False:
             print(f"{node_a.name}, Not equal")
-            rotation_bias_matrix = get_rotation_matrix(node_b_dir_2, node_a_dir_2)
+            # A重定向至B, 因此是获得 A->B 的旋转矩阵
+            rotation_bias_matrix = get_rotation_matrix(node_a_dir_2, node_b_dir_2)
             node_a.retarget = R.from_matrix(rotation_bias_matrix)
         else:
             node_a.retarget = R.identity()

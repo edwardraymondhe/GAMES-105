@@ -173,19 +173,23 @@ def retarget_node(node_a_prev, node_a, node_b):
         node_a_dir_1 = get_unit_vector(node_a.offset)
         node_a_dir_2 = get_unit_vector(node_a_next.offset)
         if list_equal_within_tolerance(node_a_dir_1, node_a_dir_2) == False:
-            relative_rotation_euler_a = R.from_matrix(get_rotation_matrix(node_a_dir_1, node_a_dir_2)).as_euler('XYZ',degrees=True).tolist()
+            relative_rotation_to_child_euler_a = R.from_matrix(get_rotation_matrix(node_a_dir_1, node_a_dir_2)).as_euler('XYZ',degrees=True).tolist()
         else:
-            relative_rotation_euler_a = [0,0,0]
+            relative_rotation_to_child_euler_a = [0,0,0]
 
         # B 相对旋转计算
         node_b_next = node_b.children[0]
         node_b_dir_1 = get_unit_vector(node_b.offset)
         node_b_dir_2 = get_unit_vector(node_b_next.offset)
-        relative_rotation_euler_b = R.from_matrix(get_rotation_matrix(node_b_dir_1, node_b_dir_2)).as_euler('XYZ',degrees=True).tolist()
+        relative_rotation_to_child_euler_b = R.from_matrix(get_rotation_matrix(node_b_dir_1, node_b_dir_2)).as_euler('XYZ',degrees=True).tolist()
 
         # print(f"{node_a.name}, {node_a_dir_1.tolist()}, {node_a_dir_2.tolist()}, {relative_rotation_euler_a}, {relative_rotation_euler_b}")
 
-        if list_equal_within_tolerance(relative_rotation_euler_a, relative_rotation_euler_b) == False:
+        # 两对父子关节的相对旋转不同
+        # 相同情况：肘   -> 手腕
+        # 不同情况：肩膀 -> 肘
+        # 由于TPose和APose区别在于肩膀的旋转，由此落入不同情况
+        if list_equal_within_tolerance(relative_rotation_to_child_euler_a, relative_rotation_to_child_euler_b) == False:
             print(f"{node_a.name}, Not equal")
             # A重定向至B, 因此是获得 A->B 的旋转矩阵
             rotation_bias_matrix = get_rotation_matrix(node_a_dir_2, node_b_dir_2)

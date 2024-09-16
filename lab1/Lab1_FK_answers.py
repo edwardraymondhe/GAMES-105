@@ -1,6 +1,20 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
+class Joint:
+    idx = None
+    translation = None
+    position = None
+    rotation = None
+    orientation = None
+    
+    def __init__(self, idx, translation, position, rotation, orientation):
+        self.idx = idx
+        self.translation = translation
+        self.position = position
+        self.rotation = rotation
+        self.orientation = orientation
+
 def load_motion_data(bvh_file_path):
     """part2 辅助函数，读取bvh文件"""
     with open(bvh_file_path, 'r') as f:
@@ -77,9 +91,47 @@ def part2_forward_kinematics(joint_name, joint_parent, joint_offset, motion_data
         1. joint_orientations的四元数顺序为(x, y, z, w)
         2. from_euler时注意使用大写的XYZ
     """
-    joint_positions = None
-    joint_orientations = None
-    return joint_positions, joint_orientations
+    motion_data_curr = motion_data[frame_id]
+    joint_len = len(joint_name)
+    joint_positions = []
+    joint_orientations = []
+    joint_orientations_quat = []
+    
+    
+    r_euler = motion_data_curr[3 : 6]
+    r_r = R.from_euler('XYZ', r_euler, degrees=True)
+    q_curr = r_r
+    p_curr = motion_data_curr[0:3]
+    
+    joint_positions.append(p_curr)
+    joint_orientations.append(q_curr)
+    joint_orientations_quat.append(q_curr.as_quat())
+    
+    read_idx = 1
+    for curr_idx in range(1, joint_len):
+        
+        parent_idx = joint_parent[curr_idx]
+
+        if "end" not in joint_name[curr_idx]:
+            r_euler = motion_data_curr[3 + (read_idx * 3) : 3 + (read_idx * 3 + 3)]
+            r_r = R.from_euler('XYZ', r_euler, degrees=True)
+            read_idx += 1
+        else:
+            r_r = R.identity()
+        
+        # Qi = Q_pi * R
+        # Pi = P_pi + Q_i * l
+        q_curr = joint_orientations[parent_idx] * r_r
+        p_curr = joint_positions[parent_idx] + joint_orientations[parent_idx].apply(joint_offset[curr_idx])
+            
+        joint_positions.append(p_curr)
+        joint_orientations.append(q_curr)
+        joint_orientations_quat.append(q_curr.as_quat())
+       
+        
+    joint_positions_np = np.array(joint_positions)
+    joint_orientations_np = np.array(joint_orientations_quat)
+    return joint_positions_np, joint_orientations_np
 
 
 def part3_retarget_func(T_pose_bvh_path, A_pose_bvh_path):

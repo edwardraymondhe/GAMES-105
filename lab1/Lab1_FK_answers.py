@@ -2,18 +2,40 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 class Joint:
-    idx = None
-    translation = None
-    position = None
-    rotation = None
-    orientation = None
-    
-    def __init__(self, idx, translation, position, rotation, orientation):
+    def __init__(self, idx, name, translation):
         self.idx = idx
+        self.name = name
         self.translation = translation
-        self.position = position
-        self.rotation = rotation
-        self.orientation = orientation
+        self.position = None
+        self.rotation = R.identity()
+        self.orientation = R.identity()
+        self.children = []
+        self.parent = None
+        
+    def log(self):
+        print(self.name)
+        for i in range(len(self.children)):
+            self.children[i].log()
+            
+    def fk(self):
+        # todo: calculate
+        # todo: iterate
+                    
+        # Non-root 
+        if self.parent != None:
+            # Qi = Q_pi * R
+            # Pi = P_pi + Q_i * l
+            self.orientation = self.parent.orientation * self.rotation
+            self.position = self.parent.position + self.parent.orientation.apply(self.translation)
+        else:        
+            # Root
+            self.orientation = self.rotation
+            self.position = self.translation
+
+        for i in range(len(self.children)):
+            self.children[i].fk()
+
+joint_list = []
 
 def load_motion_data(bvh_file_path):
     """part2 辅助函数，读取bvh文件"""
@@ -34,6 +56,7 @@ def load_motion_data(bvh_file_path):
 
 
 def part1_calculate_T_pose(bvh_file_path):
+    global joint_list
     """请填写以下内容
     输入： bvh 文件路径
     输出:
@@ -76,10 +99,26 @@ def part1_calculate_T_pose(bvh_file_path):
 
     joint_offset = np.array(joint_offset_arr)
     
+    joint_list = []
+    for i in range(0, len(joint_parent)):
+        pi = joint_parent[i]
+
+        child = Joint(i, joint_name[i], joint_offset[i])
+        joint_list.append(child)
+        
+        if i != 0:
+            parent = joint_list[pi]
+            parent.children.append(child)
+        else:
+            parent = None
+            
+        child.parent = parent
+        
     return joint_name, joint_parent, joint_offset
 
 
 def part2_forward_kinematics(joint_name, joint_parent, joint_offset, motion_data, frame_id):
+    global joint_list
     """请填写以下内容
     输入: part1 获得的关节名字，父节点列表，偏移量列表
         motion_data: np.ndarray，形状为(N,X)的numpy数组，其中N为帧数，X为Channel数
@@ -95,43 +134,30 @@ def part2_forward_kinematics(joint_name, joint_parent, joint_offset, motion_data
     joint_len = len(joint_name)
     joint_positions = []
     joint_orientations = []
-    joint_orientations_quat = []
     
-    
-    r_euler = motion_data_curr[3 : 6]
-    r_r = R.from_euler('XYZ', r_euler, degrees=True)
-    q_curr = r_r
-    p_curr = motion_data_curr[0:3]
-    
-    joint_positions.append(p_curr)
-    joint_orientations.append(q_curr)
-    joint_orientations_quat.append(q_curr.as_quat())
-    
-    read_idx = 1
-    for curr_idx in range(1, joint_len):
-        
-        parent_idx = joint_parent[curr_idx]
+    # Parse Root translation
+    joint_list[0].translation = motion_data_curr[0:3]
 
-        if "end" not in joint_name[curr_idx]:
+    # Parse Joint rotations
+    read_idx = 0
+    for curr_idx in range(0, joint_len):
+        curr = joint_list[curr_idx]
+        r_r = R.identity()
+        
+        if len(curr.children) != 0:
             r_euler = motion_data_curr[3 + (read_idx * 3) : 3 + (read_idx * 3 + 3)]
             r_r = R.from_euler('XYZ', r_euler, degrees=True)
             read_idx += 1
-        else:
-            r_r = R.identity()
         
-        # Qi = Q_pi * R
-        # Pi = P_pi + Q_i * l
-        q_curr = joint_orientations[parent_idx] * r_r
-        p_curr = joint_positions[parent_idx] + joint_orientations[parent_idx].apply(joint_offset[curr_idx])
-            
-        joint_positions.append(p_curr)
-        joint_orientations.append(q_curr)
-        joint_orientations_quat.append(q_curr.as_quat())
+        curr.rotation = r_r
+        
+    # Recursive fk() from Root
+    joint_list[0].fk()
        
-        
-    joint_positions_np = np.array(joint_positions)
-    joint_orientations_np = np.array(joint_orientations_quat)
-    return joint_positions_np, joint_orientations_np
+    for i in range(joint_len):
+        joint_positions.append(joint_list[i].position)
+        joint_orientations.append(joint_list[i].orientation.as_quat())
+    return np.array(joint_positions), np.array(joint_orientations)
 
 
 def part3_retarget_func(T_pose_bvh_path, A_pose_bvh_path):

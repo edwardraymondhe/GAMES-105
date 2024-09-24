@@ -7,6 +7,7 @@ class Joint:
         self.name = name
         self.translation = None
         self.position = None
+        self.last_rotation = R.identity()
         self.rotation = R.identity()
         self.orientation = R.identity()
         self.children = []
@@ -23,7 +24,7 @@ class Joint:
         # Non-root 
         if self.parent != None:
             # Qi = Q_pi * R
-            # Pi = P_pi + Q_i * l
+            # Pi = P_pi + Q_pi * l
             self.orientation = self.parent.orientation * self.rotation
             self.position = self.parent.position + self.parent.orientation.apply(self.translation)
         else:        
@@ -33,6 +34,20 @@ class Joint:
 
         for i in range(len(self.children)):
             self.children[i].fk_by_offset()
+            
+    def calculate_offset_by_position(self):
+        # Non-root 
+        if self.parent != None:
+            # Qi = Q_pi * R
+            # Pi = P_pi + Q_i * l
+            self.translation = self.position - self.parent.position
+        else:        
+            # Root
+            self.translation = self.position
+
+        for i in range(len(self.children)):
+            self.children[i].calculate_offset_by_position()
+        
             
     def fk_by_orientation(self):
         # Non-root 
@@ -49,15 +64,15 @@ class Joint:
         for i in range(len(self.children)):
             self.children[i].fk_by_orientation()
             
-def create_list(joint_name, joint_parent, joint_offset = None, joint_position = None):
+def create_list(joint_name, joint_parent, joint_offset = [], joint_position = []):
     joint_list = []
     for i in range(0, len(joint_parent)):
         pi = joint_parent[i]
 
         child = Joint(i, joint_name[i])
-        if (joint_offset != None):
+        if (len(joint_offset) > 0):
             child.translation = joint_offset[i]
-        if (joint_position != None):
+        if (len(joint_position) > 0):
             child.position = joint_position[i]
             
         joint_list.append(child)
@@ -150,7 +165,8 @@ def get_rotation_matrix(a, b):
             [-u[1], u[0], 0]]
         )
     
-    r = R.identity().as_matrix() + sin_theta * matrix + (1 - cos_theta) * matrix * matrix
+    # operator(*) with matrixes doesn't mean multiplying matrix mathematically
+    r = R.identity().as_matrix() + sin_theta * matrix + (1 - cos_theta) * matrix.dot(matrix)
     
     return r
 

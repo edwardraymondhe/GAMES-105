@@ -19,7 +19,11 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
         joint_orientations: 计算得到的关节朝向，是一个numpy数组，shape为(M, 4)，M为关节数
     """
     
+    # With original joints
     joint_positions, joint_orientations = ik_ccd_1(meta_data, joint_positions, joint_orientations, target_pose)
+    
+    # Virtual joints
+    # joint_positions, joint_orientations = ik_ccd_2(meta_data, joint_positions, joint_orientations, target_pose)
     
     return joint_positions, joint_orientations
 
@@ -40,11 +44,11 @@ def ik_ccd_1(meta_data, joint_positions, joint_orientations, target_pose):
     path, path_name, path1, path2 = meta_data.get_path_from_root_to_end()
     
     distance_threshold = 0.01
-    iter_threshold = 5
+    iter_threshold = 1
     
     path_reverse = list(reversed(path))
-    print(path)
-    print(path_name)
+    # print(path)
+    # print(path_name)
     # Path2 = start -> root
     # Path1 = end -> root-1
     joint_list = utils.create_list(meta_data.joint_name, meta_data.joint_parent, joint_position=meta_data.joint_initial_position)
@@ -58,6 +62,7 @@ def ik_ccd_1(meta_data, joint_positions, joint_orientations, target_pose):
         for i, curr_i_idx in enumerate(path_reverse[1:-1]):
             # if i == 8:
             #     break
+            print("********")
             
             curr_i = joint_list[curr_i_idx]
             next_i_idx = path_reverse[1:][i+1]
@@ -79,6 +84,7 @@ def ik_ccd_1(meta_data, joint_positions, joint_orientations, target_pose):
                 
                 curr_i.last_rotation = curr_i.rotation
                 curr_i.rotation = curr_i.last_rotation * rotation
+                print(f"{curr_i.name}")
             else:            
                 # Negative direction, When get passes zero, flip the calculation
                 # TODO: How about reverse, from toe to wrist?
@@ -96,10 +102,11 @@ def ik_ccd_1(meta_data, joint_positions, joint_orientations, target_pose):
                     
                     curr_i.children[0].last_rotation = curr_i.children[0].rotation
                     curr_i.children[0].rotation = curr_i.children[0].last_rotation * rotation
-                    
+                    print(f"{curr_i.name} -> {curr_i.children[0].name}")
             if curr_i.idx == 0:
                 fk_direction_i = False
                     
+            print("_____")
             fk_direction_j = False
             for j, curr_j_idx in enumerate(path[:-1]):
                 curr_j = joint_list[curr_j_idx]
@@ -113,21 +120,49 @@ def ik_ccd_1(meta_data, joint_positions, joint_orientations, target_pose):
                     if curr_j.idx != 0:
                         curr_j.orientation = curr_j.parent.orientation * curr_j.rotation
                         curr_j.position = curr_j.parent.position + curr_j.parent.orientation.apply(curr_j.translation)
-                    else:
+                    # else:
                         # Root
                         # curr_j.orientation = curr_j.orientation * (curr_j.last_rotation.inv() * curr_j.rotation)
                         # curr_j.orientation = curr_j.orientation
-                        curr_j.orientation = curr_j.orientation * curr_j.rotation.inv()
+                        # curr_j.orientation = curr_j.orientation * curr_j.rotation.inv()
+                        # curr_j.orientation = curr_j.rotation
+                    
+                    print(curr_j.name)
                 else:
                     # Q_pi = Qi * R(-1)
                     # P_pi = P_i - Q_pi * l
-                    if curr_j.parent.idx != 0:
-                        curr_j.parent.orientation = curr_j.orientation * curr_j.rotation.inv()
-                        curr_j.parent.position = curr_j.position - curr_j.parent.orientation.apply(curr_j.translation)
-                    else:
-                        # Root
-                        curr_j.parent.orientation = curr_j.orientation * curr_j.rotation.inv()
-                        curr_j.parent.position = curr_j.position - curr_j.parent.orientation.apply(curr_j.translation)
+                    
+                    parent = None
+                    child = None
+                    
+                    if len(curr_j.children) == 1:
+                        parent = curr_j
+                        child = curr_j.children[0]
+                        parent.orientation = child.orientation * child.rotation.inv()
+                        parent.position = child.position - parent.orientation.apply(child.translation)
+                        print(f"{parent.name} -> {child.name}")
+                        if curr_j.parent.idx == 0:
+                            # root
+                            root = curr_j.parent
+                            # hip
+                            hip = curr_j
+                            
+                            root.orientation = hip.orientation * hip.rotation.inv() * root.rotation
+                            root.position = hip.position + hip.orientation.apply(-hip.rotation.inv().apply(hip.translation))
+                        
+                    # if curr_j.parent.idx != 0:
+                    #     parent = curr_j.parent
+                    #     child = curr_j
+                    #     parent.orientation = child.orientation * child.rotation.inv()
+                    #     parent.position = child.position - parent.orientation.apply(child.translation)
+                    #     print(f"{parent.name} -> {child.name}")
+                    # else:
+                    #     # Root
+                    #     curr_j.parent.orientation = curr_j.orientation * curr_j.rotation.inv()
+                    #     curr_j.parent.position = curr_j.position - curr_j.parent.orientation.apply(curr_j.translation)
+                    
+                    # if parent != None and child != None:
+                    #     print(f"{parent.name} -> {child.name}")
                     
                 if len(curr_j.children) > 1:
                     for un_ik_child in curr_j.children:

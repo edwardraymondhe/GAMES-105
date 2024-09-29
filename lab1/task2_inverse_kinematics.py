@@ -108,7 +108,7 @@ def part1_animation(viewer, target_pos):
 
 
 def part2(viewer, bvh_name):
-    motion_data = load_motion_data(bvh_name)
+    motion_data = utils.load_motion_data(bvh_name)
     bvh_joint_name, bvh_joint_parent, bvh_offset = part1_calculate_T_pose(bvh_name)
     joint_name, _, joint_initial_position = viewer.get_meta_data()
     idx = [joint_name.index(name) for name in bvh_joint_name]

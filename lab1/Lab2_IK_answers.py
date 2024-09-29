@@ -218,61 +218,56 @@ def ik_jacobian(meta_data: MetaData, joint_positions: np.ndarray, joint_orientat
         joint_positions: 计算得到的关节位置，是一个numpy数组，shape为(M, 3)，M为关节数
         joint_orientations: 计算得到的关节朝向，是一个numpy数组，shape为(M, 4)，M为关节数
     """
+    # [F(0)] = J(T) * delta = [f(0)](T) * delta
+    # target is to minimize "f(0) - x"
+    # f(0) is end's position
+
+    # Qi = Q_pi * R
+    # Pi = P_pi + Q_pi * l
+    # R = Q_pi(T) * Qi
+    # l = Q_pi(T) * (Pi - P_pi)
+    # Q_pi = Qi * R(-1)
+    # P_pi = P_i - Q_pi * l
+
+    # Logic:
+    # 1a. end's position is determined by its parent's position, parent's orientation, its offset
+    # 1b. its parent's position and orientation are determined by its parent's position and orientation, and its offset
+    # 2. therefore, once we have "required_grad=True", every operator applied on joint_rotations_t and joint_orientations_t can be tracked by pytorch (it's done by having a dag)
+    # 3. after everything is being calculated & operated, can use pytorch's AutoGrad function
+    # IMPORTANT: Only fk can get its recursive operators path, for the autograd to work in pytorch
+    # 4a. target = (joint_positions_t[path[0]] - target_pose)
+    # 4b. target.backward()
+    # 4c. joint_orientations_t = joint_orientations_t - learning_rate * target.grad
+    
     path, path_name, path1, path2 = meta_data.get_path_from_root_to_end()
     joint_name = meta_data.joint_name
     joint_parent = meta_data.joint_parent
     
     distance_threshold = 0.01
     
-    path_reverse = list(reversed(path))
-    path_name_reverse = list(reversed(path_name))
-    
+    # path_reverse = list(reversed(path))
     # [21, 19, 17, 15, 13, 2, 1, 0, 4, 6, 8, 10, 23]
     # ['lWrist_end', 'lWrist', 'lElbow', 'lShoulder', 'lTorso_Clavicle', 'lowerback_torso', 'pelvis_lowerback', 'RootJoint', 'lHip', 'lKnee', 'lAnkle', 'lToeJoint', 'lToeJoint_end']
     # print("Reverse")
     # print(path_reverse)
-    # print(path_name_reverse)
     # print("Normal")
     # print(path)
     # print(path_name)
-
      
-    # Calculate & create joint_rotations
     joint_rotations = [(R.from_quat(joint_orientations[joint_parent[i]]).inv() * R.from_quat(joint_orientations[i])).as_quat() if i != 0 else joint_orientations[0] for i in range(len(joint_orientations))]
-    # Calculate & create joint_offsets
     joint_offsets = [R.from_quat(joint_orientations[joint_parent[i]]).inv().as_matrix() @ (joint_positions[i] - joint_positions[joint_parent[i]]) if i != 0 else joint_positions[0] for i in range(len(joint_positions))]
-    
     joint_orientations_t = [torch.tensor(R.from_quat(orientation).as_matrix(), requires_grad=True) for orientation in joint_orientations]
     joint_rotations_t = [torch.tensor(R.from_quat(rotation).as_matrix(), requires_grad=True) for rotation in joint_rotations]
-    
     joint_positions_t = [torch.tensor(data) for data in joint_positions]
     joint_offsets_t = [torch.tensor(data) for data in joint_offsets]
     
-    target_pose_t = torch.tensor(target_pose)
+    target_pos_t = torch.tensor(target_pose)
     
     iter_threshold = 300
-    learning_rate = 0.1
+    learning_rate = 0.01
     
     for _ in range(iter_threshold):
         
-        # [F(0)] = J(T) * delta = [f(0)](T) * delta
-        # target is to minimize "f(0) - x"
-        # f(0) is end's position
-
-        # Qi = Q_pi * R
-        # Pi = P_pi + Q_pi * l
-        # R = Q_pi(T) * Qi
-        # l = Q_pi(T) * (Pi - P_pi)
-        # Q_pi = Qi * R(-1)
-        # P_pi = P_i - Q_pi * l
-    
-        # fk_direction_i = True
-        # Logic:
-        # 1a. end's position is determined by its parent's position, parent's orientation, its offset
-        # 1b. its parent's position and orientation are determined by its parent's position and orientation, and its offset
-        # 2. therefore, once we have "required_grad=True", every operator applied on joint_rotations_t and joint_orientations_t can be tracked by pytorch (it's done by having a dag)
-        # 3. after everything is being calculated & operated, can use pytorch's AutoGrad function
-        # IMPORTANT: Only fk can get its recursive operators path, for the autograd to work in pytorch
         for i in range(len(path)):
             # if fk_direction_j:
             #     # Qi = Q_pi * R
@@ -280,69 +275,186 @@ def ik_jacobian(meta_data: MetaData, joint_positions: np.ndarray, joint_orientat
             # else:
             #     # Q_pi = Qi * R(-1)
             #     # P_pi = P_i - Q_pi * l
-                
-            # Positive direction
-            # parent = joint_parent[curr]
             curr = path[i]
             if i == 0:
                 joint_orientations_t[curr] = joint_rotations_t[curr]
                 joint_positions_t[curr] = joint_offsets_t[curr]
             else:
-                parent = path[i-1]
-                joint_orientations_t[curr] = joint_orientations_t[parent] @ joint_rotations_t[curr]
-                joint_positions_t[curr] = joint_positions_t[parent] + joint_orientations_t[parent] @ joint_offsets_t[curr]
-            
-            # if fk_direction_i:
-            # else:            
-                # Negative direction, When get passes zero, flip the calculation
-            # if curr == 0:
-            #     fk_direction_i = False
-        
-        # Logic:
-        # 4a. target = (joint_positions_t[path[0]] - target_pose)
-        # 4b. target.backward()
-        # 4c. joint_orientations_t = joint_orientations_t - learning_rate * target.grad
+                prev = path[i-1]
+                
+                if prev == joint_parent[curr]:
+                    # ---   prev->curr    --->
+                    parent = prev
+                    child = curr
+                    joint_orientations_t[child] = joint_orientations_t[parent] @ joint_rotations_t[child]
+                    joint_positions_t[child] = joint_positions_t[parent] + joint_orientations_t[parent] @ joint_offsets_t[child]
+                else:
+                    # ---   prev<-curr    --->
+                    parent = curr
+                    child = prev
+                    joint_orientations_t[parent] = joint_orientations_t[child] @ torch.transpose(joint_rotations_t[child],0,1)
+                    joint_positions_t[parent] = joint_positions_t[child] - joint_orientations_t[parent] @ joint_offsets_t[child]
         
         # Avoids nan
-        target_function = torch.norm(joint_positions_t[path_reverse[0]] - target_pose_t)
+        target_function = torch.norm(joint_positions_t[path[-1]] - target_pos_t)
         # RuntimeError: grad can be implicitly created only for scalar outputs
         target_function.backward(torch.ones_like(target_function))
         
         for j in range(len(path)):
             if joint_rotations_t[j].grad != None:
                 joint_rotations_t[j] = torch.tensor(joint_rotations_t[j] - learning_rate * joint_rotations_t[j].grad, requires_grad=True)
+    
+    joint_rotations = [tensor2quaternion(rotation_t) for rotation_t in joint_rotations_t]
         
     for i in range(len(path)):
         curr = path[i]
         if i == 0:
-            joint_orientations_t[curr] = joint_rotations_t[curr]
-            joint_positions_t[curr] = joint_offsets_t[curr]
+            joint_orientations[curr] = joint_rotations[curr]
+            joint_positions[curr] = joint_offsets[curr]
         else:
-            parent = path[i-1]
-            joint_orientations_t[curr] = joint_orientations_t[parent] @ joint_rotations_t[curr]
-            joint_positions_t[curr] = joint_positions_t[parent] + torch.tensor(R.from_quat(tensor2quaternion(joint_orientations_t[parent])).as_matrix()) @ joint_offsets_t[curr]
+            prev = path[i-1]
+                
+            if prev == joint_parent[curr]:
+                # ---   prev->curr    --->
+                parent = prev
+                child = curr
+                joint_orientations[child] = R.as_quat(R.from_quat(joint_orientations[parent]) * R.from_quat(joint_rotations[child]))
+                joint_positions[child] = joint_positions[parent] + R.from_quat(joint_orientations[parent]).apply(joint_offsets_t[child])
+            else:
+                # ---   prev<-curr    --->
+                parent = curr
+                child = prev
+                joint_orientations[parent] = R.as_quat(R.from_quat(joint_orientations[child]) * R.from_quat(joint_rotations[child]).inv())
+                joint_positions[parent] = joint_positions[child] - R.from_quat(joint_orientations[parent]).apply(joint_offsets[child])
+            # joint_positions_t[curr] = joint_positions_t[parent] + torch.tensor(R.from_quat(tensor2quaternion(joint_orientations_t[parent])).as_matrix()) @ joint_offsets_t[curr]
             
     # Make the rest to follow by fk
     for i in range(len(joint_name)):
         curr = i
         if i not in path:
             if i == 0:
-                joint_orientations_t[curr] = joint_rotations_t[curr]
-                joint_positions_t[curr] = joint_offsets_t[curr]
+                joint_orientations[curr] = joint_rotations[curr]
+                joint_positions[curr] = joint_offsets[curr]
             else:
                 parent = joint_parent[i]
-                joint_orientations_t[curr] = joint_orientations_t[parent] @ joint_rotations_t[curr]
-                joint_positions_t[curr] = joint_positions_t[parent] + torch.tensor(R.from_quat(tensor2quaternion(joint_orientations_t[parent])).as_matrix()) @ joint_offsets_t[curr]
+                joint_orientations[curr] = R.as_quat(R.from_quat(joint_orientations[parent]) * R.from_quat(joint_rotations[curr]))
+                joint_positions[curr] = joint_positions[parent] + R.from_quat(joint_orientations[parent]).apply(joint_offsets[curr])
 
-    joint_orientations_ndarray = np.array([R.from_matrix(data.detach().numpy()).as_quat().tolist() for data in joint_orientations_t])
-    joint_positions_ndarray = np.array([data.detach().numpy().tolist() for data in joint_positions_t])
-    
-    return joint_positions_ndarray, joint_orientations_ndarray
+    return joint_positions, joint_orientations
 
 def part2_inverse_kinematics(meta_data, joint_positions, joint_orientations, relative_x, relative_z, target_height):
     """
     输入lWrist相对于RootJoint前进方向的xz偏移，以及目标高度，IK以外的部分与bvh一致
     """
+    
+    path, path_name, path1, path2 = meta_data.get_path_from_root_to_end()
+    joint_name = meta_data.joint_name
+    joint_parent = meta_data.joint_parent
+    
+    distance_threshold = 0.01
+    
+    # path_reverse = list(reversed(path))
+    # [21, 19, 17, 15, 13, 2, 1, 0, 4, 6, 8, 10, 23]
+    # ['lWrist_end', 'lWrist', 'lElbow', 'lShoulder', 'lTorso_Clavicle', 'lowerback_torso', 'pelvis_lowerback', 'RootJoint', 'lHip', 'lKnee', 'lAnkle', 'lToeJoint', 'lToeJoint_end']
+    # print("Reverse")
+    # print(path_reverse)
+    # print("Normal")
+    # print(path)
+    # print(path_name)
+     
+    joint_rotations = [(R.from_quat(joint_orientations[joint_parent[i]]).inv() * R.from_quat(joint_orientations[i])).as_quat() if i != 0 else joint_orientations[0] for i in range(len(joint_orientations))]
+    joint_offsets = [R.from_quat(joint_orientations[joint_parent[i]]).inv().as_matrix() @ (joint_positions[i] - joint_positions[joint_parent[i]]) if i != 0 else joint_positions[0] for i in range(len(joint_positions))]
+    joint_orientations_t = [torch.tensor(R.from_quat(orientation).as_matrix(), requires_grad=True) for orientation in joint_orientations]
+    joint_rotations_t = [torch.tensor(R.from_quat(rotation).as_matrix(), requires_grad=True) for rotation in joint_rotations]
+    joint_positions_t = [torch.tensor(data) for data in joint_positions]
+    joint_offsets_t = [torch.tensor(data) for data in joint_offsets]
+    
+    target_pos_t = torch.tensor([joint_positions[0][0] + relative_x, target_height, joint_positions[0][2] + relative_z])
+    
+    iter_threshold = 300
+    learning_rate = 0.5
+    
+    root_parent = joint_parent[path[0]]
+    
+    for idx in path:
+        joint_rotations_t[idx] = torch.tensor(R.from_quat([1.,0.,0.,0.]).as_matrix(), requires_grad=True, dtype=torch.float64)
+    
+    for _ in range(iter_threshold):
+        
+        for i in range(len(path)):
+            # if fk_direction_j:
+            #     # Qi = Q_pi * R
+            #     # Pi = P_pi + Q_pi * l                    
+            # else:
+            #     # Q_pi = Qi * R(-1)
+            #     # P_pi = P_i - Q_pi * l
+            curr = path[i]
+            if i == 0:
+                joint_orientations_t[curr] = joint_rotations_t[curr]
+                joint_positions_t[curr] = joint_positions_t[root_parent] + joint_orientations_t[root_parent] @ joint_offsets_t[curr]
+            else:
+                prev = path[i-1]
+                
+                if prev == joint_parent[curr]:
+                    # ---   prev->curr    --->
+                    parent = prev
+                    child = curr
+                    joint_orientations_t[child] = joint_orientations_t[parent] @ joint_rotations_t[child]
+                    joint_positions_t[child] = joint_positions_t[parent] + joint_orientations_t[parent] @ joint_offsets_t[child]
+                else:
+                    # ---   prev<-curr    --->
+                    parent = curr
+                    child = prev
+                    joint_orientations_t[parent] = joint_orientations_t[child] @ torch.transpose(joint_rotations_t[child],0,1)
+                    joint_positions_t[parent] = joint_positions_t[child] - joint_orientations_t[parent] @ joint_offsets_t[child]
+        
+        # Avoids nan
+        target_function = torch.norm(joint_positions_t[path[-1]] - target_pos_t)
+        # RuntimeError: grad can be implicitly created only for scalar outputs
+        target_function.backward(torch.ones_like(target_function))
+        
+        for j in path:
+            if joint_rotations_t[j].grad != None:
+                joint_rotations_t[j] = torch.tensor(joint_rotations_t[j] - learning_rate * joint_rotations_t[j].grad, requires_grad=True)
+    
+    joint_rotations = [tensor2quaternion(rotation_t) for rotation_t in joint_rotations_t]
+        
+    # for i in range(len(path)):
+    #     curr = path[i]
+    #     if i == 0:
+    #         joint_orientations[curr] = joint_rotations[curr]
+    #         joint_positions[curr] = joint_positions[root_parent] + R.from_quat(joint_orientations[root_parent]).apply(joint_offsets[curr])
+    #     else:
+    #         prev = path[i-1]
+                
+    #         if prev == joint_parent[curr]:
+    #             # ---   prev->curr    --->
+    #             parent = prev
+    #             child = curr
+    #             joint_orientations[child] = R.as_quat(R.from_quat(joint_orientations[parent]) * R.from_quat(joint_rotations[child]))
+    #             joint_positions[child] = joint_positions[parent] + R.from_quat(joint_orientations[parent]).apply(joint_offsets_t[child])
+    #         else:
+    #             # ---   prev<-curr    --->
+    #             parent = curr
+    #             child = prev
+    #             joint_orientations[parent] = R.as_quat(R.from_quat(joint_orientations[child]) * R.from_quat(joint_rotations[child]).inv())
+    #             joint_positions[parent] = joint_positions[child] - R.from_quat(joint_orientations[parent]).apply(joint_offsets[child])
+    #         # joint_positions_t[curr] = joint_positions_t[parent] + torch.tensor(R.from_quat(tensor2quaternion(joint_orientations_t[parent])).as_matrix()) @ joint_offsets_t[curr]
+            
+    # Make the rest to follow by fk
+    for i in range(len(joint_name)):
+        curr = i
+        if i == 0:
+            joint_orientations[curr] = joint_rotations[curr]
+            joint_positions[curr] = joint_offsets[curr]
+        else:
+            parent = joint_parent[i]
+            if i == path[0]:
+                joint_orientations[curr] = joint_rotations[curr]
+            else:
+                joint_orientations[curr] = R.as_quat(R.from_quat(joint_orientations[parent]) * R.from_quat(joint_rotations[curr]))
+            joint_positions[curr] = joint_positions[parent] + R.from_quat(joint_orientations[parent]).apply(joint_offsets[curr])
+    
     
     return joint_positions, joint_orientations
 

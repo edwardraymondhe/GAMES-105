@@ -225,18 +225,27 @@ class BVHMotion():
         # use matrix's y direction to create R'(rotation-matrix)
         # then 1. Ry = R'R, 2. Rxz = Ry(T)R
         
-        src_rotation = R.from_quat(rotation)
-        src_rotation_matrix = src_rotation.as_matrix()
-        src_vec = src_rotation_matrix[1]
-        dst_vec = [0, 1, 0]
+        # Method 1, original rotation decomposition (has weird artifacts)
+        # src_rotation = R.from_quat(rotation)
+        # src_rotation_matrix = src_rotation.as_matrix()
+        # src_vec = src_rotation_matrix[1]
+        # dst_vec = [0, 1, 0]
         
-        inter_rotation_matrix = utils.get_rotation_matrix(src_vec, dst_vec)
-        inter_rotation = R.from_matrix(inter_rotation_matrix)
+        # inter_rotation_matrix = utils.get_rotation_matrix(src_vec, dst_vec)
+        # inter_rotation = R.from_matrix(inter_rotation_matrix)
         
-        Ry_rotation = inter_rotation * src_rotation
-        Rxz_rotation = Ry_rotation.inv() * src_rotation
-        Ry = Ry_rotation.as_quat()
-        Rxz = Rxz_rotation.as_quat()
+        # Ry_rotation = inter_rotation * src_rotation
+        # Rxz_rotation = Ry_rotation.inv() * src_rotation
+        # Ry = Ry_rotation.as_quat()
+        # Rxz = Rxz_rotation.as_quat()
+        
+        # Method 2
+        # TODO: somehow doesn't create artifact...
+        Ry = R.from_quat(rotation).as_euler("XYZ", degrees=True)
+        Ry = R.from_euler("XYZ", [0, Ry[1], 0], degrees=True)
+        Rxz = Ry.inv() * R.from_quat(rotation)
+        Ry = Ry.as_quat()
+        Rxz = Rxz.as_quat()
         
         # print("R")
         # print(src_rotation_matrix)
@@ -422,7 +431,7 @@ def build_loop_motion(bvh_motion):
     return build_loop_motion(res)
 
 # part4
-def concatenate_two_motions(bvh_motion1, bvh_motion2, mix_frame1, mix_time):
+def concatenate_two_motions(bvh_motion1: BVHMotion, bvh_motion2: BVHMotion, mix_frame1: int, mix_time: int):
     '''
     将两个bvh动作平滑地连接起来，mix_time表示用于混合的帧数
     混合开始时间是第一个动作的第mix_frame1帧
@@ -433,9 +442,64 @@ def concatenate_two_motions(bvh_motion1, bvh_motion2, mix_frame1, mix_time):
     res = bvh_motion1.raw_copy()
     
     # TODO: 你的代码
-    # 下面这种直接拼肯定是不行的(
-    res.joint_position = np.concatenate([res.joint_position[:mix_frame1], bvh_motion2.joint_position], axis=0)
-    res.joint_rotation = np.concatenate([res.joint_rotation[:mix_frame1], bvh_motion2.joint_rotation], axis=0)
+        
+    # Start from mix_frame1, do interporlation between 1&2 according to mix_time
+    # 78, 30
+    print(mix_frame1, mix_time)
+    # 182, 45
+    print(len(res.joint_position), len(bvh_motion2.joint_position))
+    # Means, from 78th frame in 1, start blend with 2
+    # 30 means let last 30 in 1[30:] & first 30 in 2[:30] blend
+
+    # Align bvh2 with bvh1's mixing frame
+    bvh_motion2_ry, _ = bvh_motion2.decompose_rotation_with_yaxis(res.joint_rotation[mix_frame1,0])
+    bvh_motion2_ry = utils.get_unit_vector([bvh_motion2_ry[1],bvh_motion2_ry[3]])
+    bvh_motion2 = bvh_motion2.translation_and_rotation(0, res.joint_position[mix_frame1,0,[0,2]], np.array(bvh_motion2_ry))
+    
+    joint_position = []
+    joint_rotation = []
+    
+    for i in range(mix_time):
+        t = i / mix_time
+        
+        # Position
+        p_1 = bvh_motion1.joint_position[mix_frame1 + i]
+        p_2 = bvh_motion2.joint_position[i]
+        p = (1-t) * p_1 + t * p_2
+        joint_position.append(p)
+        
+        # Rotation
+        tmp = []
+        for joint_idx in range(len(bvh_motion1.joint_rotation[0])):
+            r_1 = bvh_motion1.joint_rotation[mix_frame1 + i][joint_idx]
+            r_2 = bvh_motion2.joint_rotation[i][joint_idx]
+            cos_theta_q = np.dot(r_1,r_2)
+            if cos_theta_q < 0:
+                cos_theta_q = -cos_theta_q
+                r_1 = -r_1
+                # r_1 = -r_1
+            theta_q = np.arccos(cos_theta_q)
+            sin_theta_q = np.sin(theta_q)
+            if np.sin(theta_q) != 0:
+                r_1_q = (np.sin((1 - t) * theta_q) / sin_theta_q) * r_1
+                r_2_q = (np.sin(t * theta_q) / sin_theta_q) * r_2
+                r_q = r_1_q + r_2_q
+            else:
+                r_q = r_2_q
+            
+            if np.linalg.norm(r_q) == 0:
+                r_q = r_1
+                print(r_q, bvh_motion1.joint_name[joint_idx], r_1)
+            
+            tmp.append(r_q)
+        joint_rotation.append(tmp)
+        
+    
+    res.joint_position = np.concatenate([res.joint_position[:mix_frame1], np.array(joint_position)], axis=0)
+    res.joint_position = np.concatenate([res.joint_position, bvh_motion2.joint_position[mix_time:]], axis=0)
+    
+    res.joint_rotation = np.concatenate([res.joint_rotation[:mix_frame1], np.array(joint_rotation)], axis=0)
+    res.joint_rotation = np.concatenate([res.joint_rotation, bvh_motion2.joint_rotation[mix_time:]], axis=0)
     
     return res
 

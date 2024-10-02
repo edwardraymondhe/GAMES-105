@@ -157,6 +157,9 @@ def get_rotation_matrix(a, b):
     u = get_unit_vector(np.cross(a, b))
     
     theta = get_angle_between_unit_vectors(a, b)
+    return get_rotation_matrix_by_angle(u, theta)
+
+def get_rotation_matrix_by_angle(u, theta):
     sin_theta = np.sin(theta)
     cos_theta = np.cos(theta)
     matrix = np.array(
@@ -167,7 +170,6 @@ def get_rotation_matrix(a, b):
     
     # operator(*) with matrixes doesn't mean multiplying matrix mathematically
     r = R.identity().as_matrix() + sin_theta * matrix + (1 - cos_theta) * matrix.dot(matrix)
-    
     return r
 
 def list_equal_within_tolerance(list1, list2):

@@ -2,6 +2,11 @@ import numpy as np
 import copy
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
+
+import sys
+sys.path.append("..//")
+import utils
+
 # ------------- lab1里的代码 -------------#
 def load_meta_data(bvh_path):
     with open(bvh_path, 'r') as f:
@@ -109,17 +114,23 @@ class BVHMotion():
         self.joint_rotation = np.zeros((motion_data.shape[0], len(self.joint_name), 4))
         self.joint_rotation[:,:,3] = 1.0 # 四元数的w分量默认为1
         
+        # meta_data is the initial setup
+        # motion_data is the current pose
         cur_channel = 0
         for i in range(len(self.joint_name)):
             if self.joint_channel[i] == 0:
+                # if no info exist, set position = offset
                 self.joint_position[:,i,:] = joint_offset[i].reshape(1,3)
                 continue   
             elif self.joint_channel[i] == 3:
+                # if no position exist, set position = offset
                 self.joint_position[:,i,:] = joint_offset[i].reshape(1,3)
                 rotation = motion_data[:, cur_channel:cur_channel+3]
             elif self.joint_channel[i] == 6:
+                # if position exists, set position correspondingly
                 self.joint_position[:, i, :] = motion_data[:, cur_channel:cur_channel+3]
                 rotation = motion_data[:, cur_channel+3:cur_channel+6]
+            # all joints should have rotation info in bvh file
             self.joint_rotation[:, i, :] = R.from_euler('XYZ', rotation,degrees=True).as_quat()
             cur_channel += self.joint_channel[i]
         
@@ -207,7 +218,34 @@ class BVHMotion():
         '''
         Ry = np.zeros_like(rotation)
         Rxz = np.zeros_like(rotation)
+        
         # TODO: 你的代码
+        
+        # convert rotation from quat -> matrix
+        # use matrix's y direction to create R'(rotation-matrix)
+        # then 1. Ry = R'R, 2. Rxz = Ry(T)R
+        
+        src_rotation = R.from_quat(rotation)
+        src_rotation_matrix = src_rotation.as_matrix()
+        src_vec = src_rotation_matrix[1]
+        dst_vec = [0, 1, 0]
+        
+        inter_rotation_matrix = utils.get_rotation_matrix(src_vec, dst_vec)
+        inter_rotation = R.from_matrix(inter_rotation_matrix)
+        
+        Ry_rotation = inter_rotation * src_rotation
+        Rxz_rotation = Ry_rotation.inv() * src_rotation
+        Ry = Ry_rotation.as_quat()
+        Rxz = Rxz_rotation.as_quat()
+        
+        print("R")
+        print(src_rotation_matrix)
+        print("R'")
+        print(inter_rotation_matrix)
+        print("Ry")
+        print(R.from_quat(Ry).as_matrix())
+        print("Rxz")
+        print(R.from_quat(Rxz).as_matrix())
         
         return Ry, Rxz
     
@@ -231,7 +269,69 @@ class BVHMotion():
         # 比如说，你可以这样调整第frame_num帧的根节点平移
         offset = target_translation_xz - res.joint_position[frame_num, 0, [0,2]]
         res.joint_position[:, 0, [0,2]] += offset
+        
         # TODO: 你的代码
+
+        r_y, r_xz = res.decompose_rotation_with_yaxis(res.joint_rotation[frame_num, 0])
+        
+        # Method 1, matrix, wrong
+        # target_facing_direction_z = utils.get_unit_vector([target_facing_direction_xz[0], 0, target_facing_direction_xz[1]])
+        # target_facing_direction_x = utils.get_unit_vector(np.cross([0,1,0], target_facing_direction_z))
+        # target_facing_direction_matrix = [target_facing_direction_x, 
+        #                                 [0,1,0], 
+        #                                 target_facing_direction_z]
+        # R0 = R.from_matrix(target_facing_direction_matrix)
+        # print(R0.as_matrix())
+        
+        # Method 2, calculate angle with R.from_euler("Y"), correct 
+        # sin_theta_xz = np.cross(target_facing_direction_xz, np.array([0, 1])) / np.linalg.norm(target_facing_direction_xz)
+        # cos_theta_xz = np.dot(target_facing_direction_xz, np.array([0, 1])) / np.linalg.norm(target_facing_direction_xz)
+        # theta = np.arccos(cos_theta_xz)
+        # if sin_theta_xz < 0:
+        #     theta = 2 * np.pi - theta
+        # R0 = R.from_euler("Y", theta, degrees=False)
+        # print(R0.as_matrix())
+
+        # Method 3, rotate around y-axis by theta, uses previous util rotation-matrix function, correct
+        cos_theta_xz = np.dot(target_facing_direction_xz, np.array([0, 1])) / np.linalg.norm(target_facing_direction_xz)
+        theta = np.arccos(cos_theta_xz)
+        r_0 = R.from_matrix(utils.get_rotation_matrix_by_angle([0,1,0], theta))
+        print(r_0.as_matrix())
+            
+        # R_i = R_0 * R_1_t * R_1_i
+        # R_0 is the original rotation (current/base rotaion when transitioning to a frame)
+        # R_1_t is transpose of local rotation of transition frame
+        # 如果把第二项看成坐标系信息，第三项就是相对旋转
+        # 第一项就是基础项
+        
+        # 这里的R_0和t_0就是提供的参数，target_trans_xz和target_facing_dir_xz
+        # R_1其实是 joint_rotation[frame_num]
+        
+        res.joint_rotation[:, 0] = R.as_quat(r_0 *
+                                             R.from_quat(r_y).inv() * 
+                                             R.from_quat(res.joint_rotation[:, 0]))
+        
+        # Method 1: forward-kinematics
+        # trajectory_position = np.empty_like(res.joint_position)
+        # # i stands for frame_id
+        # for i in range(len(res.joint_rotation)):
+        #     if i == 0:
+        #         trajectory_position[i,0] = res.joint_position[i,0]
+        #     else:
+        #         trajectory_position[i,0] = trajectory_position[i-1,0] + (R0 * R.from_quat(Ry).inv()).apply(res.joint_position[i,0]-res.joint_position[i-1,0])
+        # res.joint_position[:,0] = trajectory_position[:,0]
+        
+        # Method 2: Motion transitioning
+        for i in range(len(res.joint_position)):
+            y = res.joint_position[frame_num,0][1]
+            
+            # Set x,z coord
+            tmp_1 = res.joint_position[i,0] - res.joint_position[frame_num,0]
+            tmp_2 = (r_0 * R.from_quat(r_y).inv()).apply(tmp_1) + res.joint_position[frame_num,0]
+            
+            # Set y coord
+            res.joint_position[i,0] = [tmp_2[0],y,tmp_2[2]]
+            
         return res
 
 # part2

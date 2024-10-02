@@ -238,14 +238,14 @@ class BVHMotion():
         Ry = Ry_rotation.as_quat()
         Rxz = Rxz_rotation.as_quat()
         
-        print("R")
-        print(src_rotation_matrix)
-        print("R'")
-        print(inter_rotation_matrix)
-        print("Ry")
-        print(R.from_quat(Ry).as_matrix())
-        print("Rxz")
-        print(R.from_quat(Rxz).as_matrix())
+        # print("R")
+        # print(src_rotation_matrix)
+        # print("R'")
+        # print(inter_rotation_matrix)
+        # print("Ry")
+        # print(R.from_quat(Ry).as_matrix())
+        # print("Rxz")
+        # print(R.from_quat(Rxz).as_matrix())
         
         return Ry, Rxz
     
@@ -261,8 +261,11 @@ class BVHMotion():
             主要是调整root节点的joint_position和joint_rotation
             frame_num可能是负数，遵循python的索引规则
             你需要完成并使用decompose_rotation_with_yaxis
-            输入的target_facing_direction_xz的norm不一定是1
+            输入的target_facing_direction_xz的norm不一定是1  
         '''
+        # NOTE:
+        # 1. R_0 is the key, make use of angle-axis instead of creating a matrix from imagination. Follow rodrigue's equation!
+        # 2. Follow slide's equation, don't have do forward-kinematics by yourself (even though you could)
         
         res = self.raw_copy() # 拷贝一份，不要修改原始数据
         
@@ -270,8 +273,6 @@ class BVHMotion():
         offset = target_translation_xz - res.joint_position[frame_num, 0, [0,2]]
         res.joint_position[:, 0, [0,2]] += offset
         
-        # TODO: 你的代码
-
         r_y, r_xz = res.decompose_rotation_with_yaxis(res.joint_rotation[frame_num, 0])
         
         # Method 1, matrix, wrong
@@ -296,7 +297,7 @@ class BVHMotion():
         cos_theta_xz = np.dot(target_facing_direction_xz, np.array([0, 1])) / np.linalg.norm(target_facing_direction_xz)
         theta = np.arccos(cos_theta_xz)
         r_0 = R.from_matrix(utils.get_rotation_matrix_by_angle([0,1,0], theta))
-        print(r_0.as_matrix())
+        # print(r_0.as_matrix())
             
         # R_i = R_0 * R_1_t * R_1_i
         # R_0 is the original rotation (current/base rotaion when transitioning to a frame)
@@ -342,14 +343,67 @@ def blend_two_motions(bvh_motion1, bvh_motion2, alpha):
     alpha: 0~1之间的浮点数组，形状为(n3,)
     返回的动作应该有n3帧，第i帧由(1-alpha[i]) * bvh_motion1[j] + alpha[i] * bvh_motion2[k]得到
     i均匀地遍历0~n3-1的同时，j和k应该均匀地遍历0~n1-1和0~n2-1
+    
     '''
+    # NOTE:
+    # When dot product between 2 quaternions is < 0, it means their angle-in-between is > 180
+    # 1. SLERP blends two values in a "shortest distance" fashion
+    # 2. q = -q, they represent the same rotation
+    # Therefore, we can flip EITHER quaternion and the cosine, to make them fall within the same half-circle (1), WITHOUT affecting the rotation (2)
     
     res = bvh_motion1.raw_copy()
     res.joint_position = np.zeros((len(alpha), res.joint_position.shape[1], res.joint_position.shape[2]))
     res.joint_rotation = np.zeros((len(alpha), res.joint_rotation.shape[1], res.joint_rotation.shape[2]))
     res.joint_rotation[...,3] = 1.0
 
-    # TODO: 你的代码
+    alpha_count = len(alpha)
+    m1_count = len(bvh_motion1.joint_position)
+    m2_count = len(bvh_motion2.joint_position)
+    print(m1_count, m2_count, alpha_count)
+    for i in range(alpha_count):
+        j = min(int(i/alpha_count * (m1_count)), m1_count-1)
+        k = min(int(i/alpha_count * (m2_count)), m2_count-1)
+        
+        res.joint_position[i] = (1 - alpha[i]) * bvh_motion1.joint_position[j] + alpha[i] * bvh_motion2.joint_position[k]
+        
+        for joint_idx in range(len(bvh_motion1.joint_rotation[0])):
+            # 四元数的乘积不是直接相乘
+            # 先把四元数变成 [w, v]
+            # [  w1 * w2 + v1 dot v2,  w1 * v2 + w2 * v2 + v1 cross v2  ]
+            # j1_quat_w, j1_quat_v = j1_quat[0], j1_quat[[1,2,3]]
+            # j2_quat_w, j2_quat_v = j2_quat[0], j2_quat[[1,2,3]]
+            
+            j1_quat = bvh_motion1.joint_rotation[j][joint_idx]
+            j2_quat = bvh_motion2.joint_rotation[k][joint_idx]
+            
+            # Method 1, quaternions
+            cos_theta_q = np.dot(j1_quat,j2_quat)
+            if cos_theta_q < 0:
+                cos_theta_q = -cos_theta_q
+                # j1_quat = -j1_quat
+                j2_quat = -j2_quat
+                
+            theta_q = np.arccos(cos_theta_q)
+            sin_theta_q = np.sin(theta_q)
+            
+            if np.sin(theta_q) != 0:
+                r_1_q = (np.sin((1 - alpha[i]) * theta_q) / sin_theta_q) * j1_quat
+                r_2_q = (np.sin(alpha[i] * theta_q) / sin_theta_q) * j2_quat
+                r_q = r_1_q + r_2_q
+            else:
+                r_q = r_2_q
+            
+            res.joint_rotation[i][joint_idx] = r_q
+
+            # Method 2, euler angles
+            # j1_euler = R.from_quat(j1_quat).as_euler('XYZ', degrees=True)
+            # j2_euler = R.from_quat(j2_quat).as_euler('XYZ', degrees=True)
+            # u, theta_e = utils.get_axis_angle_between_vectors(j1_euler, j2_euler)
+            # r_1_e = (np.sin((1 - alpha[i]) * theta_e) / np.sin(theta_e)) * j1_euler
+            # r_2_e = (np.sin(alpha[i] * theta_e) / np.sin(theta_e)) * j2_euler
+            # r_e = r_1_e + r_2_e
+            # r_e = R.from_euler('XYZ', r_e, degrees=True).as_quat()
+            # res.joint_rotation[i][joint_idx] = r_e
     
     return res
 

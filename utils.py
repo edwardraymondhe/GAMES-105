@@ -151,12 +151,18 @@ def get_angle_between_unit_vectors(a, b):
     dot_product = np.dot(a, b)
     return np.arccos(dot_product)
 
-def get_rotation_matrix(a, b):
+def get_axis_angle_between_vectors(a,b):
     a = get_unit_vector(a)
     b = get_unit_vector(b)
     u = get_unit_vector(np.cross(a, b))
     
     theta = get_angle_between_unit_vectors(a, b)
+    
+    return u, theta
+
+def get_rotation_matrix(a, b):
+    u, theta = get_axis_angle_between_vectors(a,b)
+    
     return get_rotation_matrix_by_angle(u, theta)
 
 def get_rotation_matrix_by_angle(u, theta):

@@ -17,7 +17,7 @@ def part2_one_pose(viewer, bvh_file_path):
     part2 读取一桢的pose, 完成part2_forward_kinematics函数
     """
     joint_name, joint_parent, joint_offset = part1_calculate_T_pose(bvh_file_path)
-    motion_data = load_motion_data(bvh_file_path)
+    motion_data = utils.load_motion_data(bvh_file_path)
     joint_positions, joint_orientations = part2_forward_kinematics(joint_name, joint_parent, joint_offset, motion_data, 0)
     viewer.show_pose(joint_name, joint_positions, joint_orientations)
     viewer.run()
@@ -29,7 +29,7 @@ def part2_animation(viewer, bvh_file_path):
     正确完成part2_one_pose后，无需任何操作，直接运行即可
     """
     joint_name, joint_parent, joint_offset = part1_calculate_T_pose(bvh_file_path)
-    motion_data = load_motion_data(bvh_file_path)
+    motion_data = utils.load_motion_data(bvh_file_path)
     frame_num = motion_data.shape[0]
     class UpdateHandle:
         def __init__(self):

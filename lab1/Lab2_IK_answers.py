@@ -6,11 +6,21 @@ import sys
 sys.path.append("..//")
 import utils
 
+import torch
+
 def tensor2numpy(data):
     return data.detach().numpy()
 
 def tensor2quaternion(data):
     return R.from_matrix(data.detach().numpy()).as_quat()
+
+def get_unit_matrix_tensor(matrix):
+    # 计算均值和标准差
+    mean = matrix.mean()
+    std = matrix.std()
+    # 标准化矩阵
+    unit_matrix = (matrix - mean) / std
+    return unit_matrix
 
 def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, target_pose):
     """
@@ -28,10 +38,6 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
     
     # With original joints
     # joint_positions, joint_orientations = ik_ccd_1(meta_data, joint_positions, joint_orientations, target_pose)
-    
-    # Virtual joints
-    # joint_positions, joint_orientations = ik_ccd_2(meta_data, joint_positions, joint_orientations, target_pose)
-    
     
     joint_positions, joint_orientations = ik_jacobian(meta_data, joint_positions, joint_orientations, target_pose)
     
@@ -57,10 +63,7 @@ def ik_ccd_1(meta_data, joint_positions, joint_orientations, target_pose):
     iter_threshold = 1
     
     path_reverse = list(reversed(path))
-    # print(path)
-    # print(path_name)
-    # Path2 = start -> root
-    # Path1 = end -> root-1
+    print(path_reverse)
     joint_list = utils.create_list(meta_data.joint_name, meta_data.joint_parent, joint_position=meta_data.joint_initial_position)
     joint_list[0].calculate_offset_by_position()
     
@@ -70,53 +73,62 @@ def ik_ccd_1(meta_data, joint_positions, joint_orientations, target_pose):
         
         fk_direction_i = True
         for i, curr_i_idx in enumerate(path_reverse[1:-1]):
-            # if i == 8:
-            #     break
-            print("********")
-            
             curr_i = joint_list[curr_i_idx]
-            next_i_idx = path_reverse[1:][i+1]
             
             end_position = joint_list[end_idx].position
             
             if fk_direction_i:
                 # Positive direction
+                
                 start_position = curr_i.position
+                # 当前关节到末端的向量
                 from_vec = end_position - start_position
+                # 当前关节到目标位置的向量
                 to_vec = target_pose - start_position
                 
+                # 计算距离，如果小于阈值，则停止迭代
+                distance = np.linalg.norm(end_position - target_pose)
+                if distance < distance_threshold:
+                    break
+                
+                # 计算变换矩阵&旋转
+                matrix_from2to = utils.get_rotation_matrix_by_vectors(from_vec, to_vec)
+                q_from2to = R.from_matrix(matrix_from2to)
+                
+                # 存储老旋转
+                curr_i.last_rotation = curr_i.rotation
+                # 更新旋转
+                curr_i.rotation = curr_i.last_rotation * q_from2to
+            elif len(curr_i.children) == 1:
+                # Negative direction, When get passes zero, flip the calculation
+                
+                # 当前关节的子关节
+                start_position = curr_i.children[0].position
+                # 当前关节的子关节到末端的向量
+                from_vec = end_position - start_position
+                # 当前关节的子关节到目标位置的向量
+                to_vec = target_pose - start_position
+                
+                # 计算距离，如果小于阈值，则停止迭代
                 distance = np.linalg.norm(end_position - target_pose)
                 if distance < distance_threshold:
                     break
             
-                matrix = utils.get_rotation_matrix(from_vec, to_vec)
-                rotation = R.from_matrix(matrix)
+                # 计算变换矩阵&旋转
+                matrix_from2to = utils.get_rotation_matrix_by_vectors(from_vec, to_vec)
                 
-                curr_i.last_rotation = curr_i.rotation
-                curr_i.rotation = curr_i.last_rotation * rotation
-                print(f"{curr_i.name}")
-            else:            
-                # Negative direction, When get passes zero, flip the calculation
-                # TODO: How about reverse, from toe to wrist?
-                if len(curr_i.children) == 1:
-                    start_position = curr_i.children[0].position
-                    from_vec = end_position - start_position
-                    to_vec = target_pose - start_position
-                    
-                    distance = np.linalg.norm(end_position - target_pose)
-                    if distance < distance_threshold:
-                        break
+                # 虽然迭代至当前关节，实则根据子关节的计算的转置，推导出当前关节的旋转
+                q_from2to = R.from_matrix(matrix_from2to).inv()
                 
-                    matrix = utils.get_rotation_matrix(from_vec, to_vec)
-                    rotation = R.from_matrix(matrix).inv()
+                # 存储老旋转
+                curr_i.children[0].last_rotation = curr_i.children[0].rotation
+                # 更新旋转
+                curr_i.children[0].rotation = curr_i.children[0].last_rotation * q_from2to
                     
-                    curr_i.children[0].last_rotation = curr_i.children[0].rotation
-                    curr_i.children[0].rotation = curr_i.children[0].last_rotation * rotation
-                    print(f"{curr_i.name} -> {curr_i.children[0].name}")
             if curr_i.idx == 0:
                 fk_direction_i = False
-                    
-            print("_____")
+            
+            # 根据关节i所更新的旋转，作FK
             fk_direction_j = False
             for j, curr_j_idx in enumerate(path[:-1]):
                 curr_j = joint_list[curr_j_idx]
@@ -124,56 +136,31 @@ def ik_ccd_1(meta_data, joint_positions, joint_orientations, target_pose):
                 if curr_j.idx == 0:
                     fk_direction_j = True
                 
-                if fk_direction_j:
+                if fk_direction_j and curr_j.idx != 0:
                     # Qi = Q_pi * R
-                    # Pi = P_pi + Q_pi * l                    
-                    if curr_j.idx != 0:
-                        curr_j.orientation = curr_j.parent.orientation * curr_j.rotation
-                        curr_j.position = curr_j.parent.position + curr_j.parent.orientation.apply(curr_j.translation)
-                    # else:
-                        # Root
-                        # curr_j.orientation = curr_j.orientation * (curr_j.last_rotation.inv() * curr_j.rotation)
-                        # curr_j.orientation = curr_j.orientation
-                        # curr_j.orientation = curr_j.orientation * curr_j.rotation.inv()
-                        # curr_j.orientation = curr_j.rotation
+                    # Pi = P_pi + Q_pi * l
+                    # 从父关节推导出子关节的旋转位置
+                    curr_j.orientation = curr_j.parent.orientation * curr_j.rotation
+                    curr_j.position = curr_j.parent.position + curr_j.parent.orientation.apply(curr_j.translation)
                     
-                    print(curr_j.name)
-                else:
+                elif len(curr_j.children) == 1:
                     # Q_pi = Qi * R(-1)
                     # P_pi = P_i - Q_pi * l
+                    # 从子关节推导出父关节的旋转
+                    parent = curr_j
+                    child = curr_j.children[0]
+                    parent.orientation = child.orientation * child.rotation.inv()
+                    parent.position = child.position - parent.orientation.apply(child.translation)
                     
-                    parent = None
-                    child = None
-                    
-                    if len(curr_j.children) == 1:
-                        parent = curr_j
-                        child = curr_j.children[0]
-                        parent.orientation = child.orientation * child.rotation.inv()
-                        parent.position = child.position - parent.orientation.apply(child.translation)
-                        print(f"{parent.name} -> {child.name}")
-                        if curr_j.parent.idx == 0:
-                            # root
-                            root = curr_j.parent
-                            # hip
-                            hip = curr_j
-                            
-                            root.orientation = hip.orientation * hip.rotation.inv() * root.rotation
-                            root.position = hip.position + hip.orientation.apply(-hip.rotation.inv().apply(hip.translation))
+                    # 父关节为根关节
+                    if curr_j.parent.idx == 0:
+                        root = curr_j.parent
+                        hip = curr_j
                         
-                    # if curr_j.parent.idx != 0:
-                    #     parent = curr_j.parent
-                    #     child = curr_j
-                    #     parent.orientation = child.orientation * child.rotation.inv()
-                    #     parent.position = child.position - parent.orientation.apply(child.translation)
-                    #     print(f"{parent.name} -> {child.name}")
-                    # else:
-                    #     # Root
-                    #     curr_j.parent.orientation = curr_j.orientation * curr_j.rotation.inv()
-                    #     curr_j.parent.position = curr_j.position - curr_j.parent.orientation.apply(curr_j.translation)
-                    
-                    # if parent != None and child != None:
-                    #     print(f"{parent.name} -> {child.name}")
-                    
+                        root.orientation = hip.orientation * hip.rotation.inv() * root.rotation
+                        root.position = hip.position + hip.orientation.apply(-hip.rotation.inv().apply(hip.translation))
+                
+                # 其他无需IK的关节作FK更新
                 if len(curr_j.children) > 1:
                     for un_ik_child in curr_j.children:
                         if un_ik_child.idx not in path:
@@ -195,16 +182,6 @@ def ik_ccd_1(meta_data, joint_positions, joint_orientations, target_pose):
         
     return joint_positions, joint_orientations
 
-import torch
-
-def get_unit_matrix_tensor(matrix):
-    # 计算均值和标准差
-    mean = matrix.mean()
-    std = matrix.std()
-    # 标准化矩阵
-    unit_matrix = (matrix - mean) / std
-    return unit_matrix
-
 def ik_jacobian(meta_data: MetaData, joint_positions: np.ndarray, joint_orientations: np.ndarray, target_pose: np.ndarray):
     """
     完成函数，计算逆运动学
@@ -221,13 +198,6 @@ def ik_jacobian(meta_data: MetaData, joint_positions: np.ndarray, joint_orientat
     # [F(0)] = J(T) * delta = [f(0)](T) * delta
     # target is to minimize "f(0) - x"
     # f(0) is end's position
-
-    # Qi = Q_pi * R
-    # Pi = P_pi + Q_pi * l
-    # R = Q_pi(T) * Qi
-    # l = Q_pi(T) * (Pi - P_pi)
-    # Q_pi = Qi * R(-1)
-    # P_pi = P_i - Q_pi * l
 
     # Logic:
     # 1a. end's position is determined by its parent's position, parent's orientation, its offset
@@ -253,56 +223,77 @@ def ik_jacobian(meta_data: MetaData, joint_positions: np.ndarray, joint_orientat
     # print("Normal")
     # print(path)
     # print(path_name)
-     
+    
+    
+    # Qi = Q_pi * R
+    # Pi = P_pi + Q_pi * l
+    # Q_pi = Qi * R(-1)
+    # P_pi = P_i - Q_pi * l
+
+    # - R = Q_pi(T) * Qi
     joint_rotations = [(R.from_quat(joint_orientations[joint_parent[i]]).inv() * R.from_quat(joint_orientations[i])).as_quat() if i != 0 else joint_orientations[0] for i in range(len(joint_orientations))]
+    # - l = Q_pi(T) * (Pi - P_pi)
     joint_offsets = [R.from_quat(joint_orientations[joint_parent[i]]).inv().as_matrix() @ (joint_positions[i] - joint_positions[joint_parent[i]]) if i != 0 else joint_positions[0] for i in range(len(joint_positions))]
+    
+    # 将关节旋转和偏移转换为张量
     joint_orientations_t = [torch.tensor(R.from_quat(orientation).as_matrix(), requires_grad=True) for orientation in joint_orientations]
     joint_rotations_t = [torch.tensor(R.from_quat(rotation).as_matrix(), requires_grad=True) for rotation in joint_rotations]
     joint_positions_t = [torch.tensor(data) for data in joint_positions]
     joint_offsets_t = [torch.tensor(data) for data in joint_offsets]
-    
     target_pos_t = torch.tensor(target_pose)
     
-    iter_threshold = 300
-    learning_rate = 0.01
+    iter_threshold = 500
+    a = 0.01
     
     for _ in range(iter_threshold):
         
+        # 在该路径上做所有的操作
+        # 每个节点的tensor操作由上一个操作的tensor决定，因此有个DAG关系
         for i in range(len(path)):
-            # if fk_direction_j:
-            #     # Qi = Q_pi * R
-            #     # Pi = P_pi + Q_pi * l                    
-            # else:
-            #     # Q_pi = Qi * R(-1)
-            #     # P_pi = P_i - Q_pi * l
             curr = path[i]
+            # 根节点无需计算
             if i == 0:
                 joint_orientations_t[curr] = joint_rotations_t[curr]
                 joint_positions_t[curr] = joint_offsets_t[curr]
             else:
                 prev = path[i-1]
-                
                 if prev == joint_parent[curr]:
+                    # 上个节点是父节点
                     # ---   prev->curr    --->
                     parent = prev
                     child = curr
+                    
+                    # if fk_direction_j:
+                    #     # Qi = Q_pi * R
+                    #     # Pi = P_pi + Q_pi * l_i
                     joint_orientations_t[child] = joint_orientations_t[parent] @ joint_rotations_t[child]
                     joint_positions_t[child] = joint_positions_t[parent] + joint_orientations_t[parent] @ joint_offsets_t[child]
                 else:
+                    # 当前节点是父节点
                     # ---   prev<-curr    --->
                     parent = curr
                     child = prev
+                    
+                    # else:
+                    #     # Q_pi = Qi * R(-1)
+                    #     # P_pi = P_i - Q_pi * l_i
                     joint_orientations_t[parent] = joint_orientations_t[child] @ torch.transpose(joint_rotations_t[child],0,1)
                     joint_positions_t[parent] = joint_positions_t[child] - joint_orientations_t[parent] @ joint_offsets_t[child]
         
         # Avoids nan
-        target_function = torch.norm(joint_positions_t[path[-1]] - target_pos_t)
+        # 当前路径的末端节点是需要对齐的关节
+        # target_function = torch.norm(joint_positions_t[path[-1]] - target_pos_t)
+        target_function = 0.5 * torch.norm(joint_positions_t[path[-1]] - target_pos_t) ** 2
         # RuntimeError: grad can be implicitly created only for scalar outputs
         target_function.backward(torch.ones_like(target_function))
         
         for j in range(len(path)):
             if joint_rotations_t[j].grad != None:
-                joint_rotations_t[j] = torch.tensor(joint_rotations_t[j] - learning_rate * joint_rotations_t[j].grad, requires_grad=True)
+                # r(i+1) = r(i) - a * grad(F(r(i))
+                # grad(F(r(i)) = J(T) * δ
+                # r(i+1) = r(i) - a * J(T) * δ
+                # 这里没有显示地计算J(T)，而是直接用梯度来更新
+                joint_rotations_t[j] = torch.tensor(joint_rotations_t[j] - a * joint_rotations_t[j].grad, requires_grad=True)
     
     joint_rotations = [tensor2quaternion(rotation_t) for rotation_t in joint_rotations_t]
         

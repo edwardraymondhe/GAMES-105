@@ -13,25 +13,22 @@ class Joint:
         self.children = []
         self.parent = None
         
-        self.retarget = R.identity()
-        
     def log(self):
         print(self.name)
         for i in range(len(self.children)):
             self.children[i].log()
             
     def fk_by_offset(self):
-        # Non-root 
-        if self.parent != None:
-            # Qi = Q_pi * R
-            # Pi = P_pi + Q_pi * l
-            self.orientation = self.parent.orientation * self.rotation
-            self.position = self.parent.position + self.parent.orientation.apply(self.translation)
-        else:        
-            # Root
+        if self.parent == None:
+            # 根节点
             self.orientation = self.rotation
             self.position = self.translation
-
+        else:
+            # 非根节点
+            self.orientation = self.parent.orientation * self.rotation
+            self.position = self.parent.position + self.parent.orientation.apply(self.translation)
+        
+        # 子节点递归FK
         for i in range(len(self.children)):
             self.children[i].fk_by_offset()
             
@@ -47,43 +44,34 @@ class Joint:
 
         for i in range(len(self.children)):
             self.children[i].calculate_offset_by_position()
-        
-            
-    def fk_by_orientation(self):
-        # Non-root 
-        if self.parent != None:
-            # Qi = Q_pi * R
-            # Pi = P_pi + Q_i * l
-            self.rotation = self.parent.orientation.inv() * self.orientation
-            self.position = self.parent.position + self.parent.orientation.apply(self.translation)
-        else:        
-            # Root
-            self.rotation = self.orientation
-            self.position = self.translation
-
-        for i in range(len(self.children)):
-            self.children[i].fk_by_orientation()
             
 def create_list(joint_name, joint_parent, joint_offset = [], joint_position = []):
     joint_list = []
-    for i in range(0, len(joint_parent)):
+    joint_count = len(joint_parent)
+    
+    for i in range(0, joint_count):
         pi = joint_parent[i]
 
         child = Joint(i, joint_name[i])
+        
+        # 设置位置数据
         if (len(joint_offset) > 0):
             child.translation = joint_offset[i]
         if (len(joint_position) > 0):
             child.position = joint_position[i]
             
-        joint_list.append(child)
-        
-        if i != 0:
+        # 父节点关联子节点
+        if pi != -1:
             parent = joint_list[pi]
             parent.children.append(child)
         else:
             parent = None
             
+        # 子节点关联父节点
         child.parent = parent
+        
+        # 添加该节点到列表中
+        joint_list.append(child)
         
     return joint_list
 
@@ -108,21 +96,26 @@ def retarget_to_pose(joint_origin, joint_target):
         retarget_to_pose(joint_origin_children[i], get_joint_by_name(joint_origin_children, joint_origin_children[i].name))
         
 def parse_motion_data(joint_list, motion_data_curr, frame_id):
-    # Parse Root translation
-    joint_list[0].translation = motion_data_curr[0:3]
-
-    # Parse Joint rotations
+    root_trans_size = 3
+    joint_size = len(joint_list)
+    
+    joint_list[0].translation = motion_data_curr[0:root_trans_size]
     read_idx = 0
-    for curr_idx in range(0, len(joint_list)):
-        curr = joint_list[curr_idx]
+    
+    for i in range(joint_size):
+        joint = joint_list[i]
         r_r = R.identity()
-        
-        if len(curr.children) != 0:
-            r_euler = motion_data_curr[3 + (read_idx * 3) : 3 + (read_idx * 3 + 3)]
+
+        if joint.children:
+            # 数据是局部旋转（欧拉角）
+            start = root_trans_size + read_idx * 3
+            r_euler = motion_data_curr[start: start+3]
+            # 转换成Rotation类
             r_r = R.from_euler('XYZ', r_euler, degrees=True)
+            
             read_idx += 1
         
-        curr.rotation = r_r
+        joint.rotation = r_r
 
 def load_motion_data(bvh_file_path):
     """part2 辅助函数，读取bvh文件"""
@@ -160,7 +153,10 @@ def get_axis_angle_between_vectors(a,b):
     
     return u, theta
 
-def get_rotation_matrix(a, b):
+def get_rotation_matrix_by_rotation(r):
+    return r.as_matrix()
+
+def get_rotation_matrix_by_vectors(a, b):
     u, theta = get_axis_angle_between_vectors(a,b)
     
     return get_rotation_matrix_by_angle(u, theta)

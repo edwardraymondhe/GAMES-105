@@ -219,42 +219,51 @@ class BVHMotion():
         Ry = np.zeros_like(rotation)
         Rxz = np.zeros_like(rotation)
         
-        # TODO: 你的代码
-        
         # convert rotation from quat -> matrix
         # use matrix's y direction to create R'(rotation-matrix)
         # then 1. Ry = R'R, 2. Rxz = Ry(T)R
         
-        # Method 1, original rotation decomposition (has weird artifacts)
-        # src_rotation = R.from_quat(rotation)
-        # src_rotation_matrix = src_rotation.as_matrix()
-        # src_vec = src_rotation_matrix[1]
-        # dst_vec = [0, 1, 0]
-        
-        # inter_rotation_matrix = utils.get_rotation_matrix(src_vec, dst_vec)
-        # inter_rotation = R.from_matrix(inter_rotation_matrix)
-        
-        # Ry_rotation = inter_rotation * src_rotation
-        # Rxz_rotation = Ry_rotation.inv() * src_rotation
-        # Ry = Ry_rotation.as_quat()
-        # Rxz = Rxz_rotation.as_quat()
+        # Method 1, original rotation decomposition
+        # !- ARTIFACTS CREATED BY SRC_VEC, 是[:, 1], 不是[1]
+        # !- 构造旋转矩阵 R'
+        src_rotation = R.from_quat(rotation)
+        src_rotation_matrix = src_rotation.as_matrix()
+        src_y_vec = src_rotation_matrix[:, 1]
+        dst_y_vec = [0, 1, 0]
+        dif_rotation_matrix = utils.get_rotation_matrix_by_vectors(src_y_vec, dst_y_vec)
+        dif_rotation = R.from_matrix(dif_rotation_matrix)
+        # !- 应用旋转矩阵 R'
+        Ry_rotation = dif_rotation * src_rotation
+        Rxz_rotation = Ry_rotation.inv() * src_rotation
+        Ry = Ry_rotation.as_quat()
+        Rxz = Rxz_rotation.as_quat()
         
         # Method 2
-        # TODO: somehow doesn't create artifact...
-        Ry = R.from_quat(rotation).as_euler("XYZ", degrees=True)
-        Ry = R.from_euler("XYZ", [0, Ry[1], 0], degrees=True)
-        Rxz = Ry.inv() * R.from_quat(rotation)
-        Ry = Ry.as_quat()
-        Rxz = Rxz.as_quat()
+        # 在XYZ欧拉角序列中，Y轴旋转具有特殊性质
+        # Y轴旋转对应着水平面（xz平面）上的转向，这个旋转是独立的
+        # 当我们使用XYZ顺序时，Y轴的旋转不会被X和Z的旋转"污染"
+        # 任何3D旋转都可以分解为：绕Y轴的旋转（偏航yaw）+ 其他旋转
+        # 这种分解是唯一的，因为Y轴旋转直接对应水平面上的方向变化
+        # 其他两个轴（X和Z）的旋转组合则负责处理剩余的姿态变化
         
-        # print("R")
-        # print(src_rotation_matrix)
-        # print("R'")
-        # print(inter_rotation_matrix)
-        # print("Ry")
-        # print(R.from_quat(Ry).as_matrix())
-        # print("Rxz")
-        # print(R.from_quat(Rxz).as_matrix())
+        # 这就是为什么我们可以：
+        # 可以直接提取Y轴旋转
+        # Ry = R.from_euler("XYZ", [0, euler_angles[1], 0], degrees=True)
+        # 但不能：
+        # 不能直接提取X或Z轴旋转
+        # Rx = R.from_euler("XYZ", [euler_angles[0], 0, 0], degrees=True)  # 错误
+        # Rz = R.from_euler("XYZ", [0, 0, euler_angles[2]], degrees=True)  # 错误
+        
+        # 这种特性在角色动画中特别有用，因为：
+        # 角色的转向主要是通过Y轴旋转来控制的
+        # 我们经常需要调整角色的朝向而不影响其他姿态
+        # 这种分解方式符合人类直觉的运动理解
+        
+        # Ry = R.from_quat(rotation).as_euler("XYZ", degrees=True)
+        # Ry = R.from_euler("XYZ", [0, Ry[1], 0], degrees=True)
+        # Rxz = Ry.inv() * R.from_quat(rotation)
+        # Ry = Ry.as_quat()
+        # Rxz = Rxz.as_quat()
         
         return Ry, Rxz
     
@@ -278,20 +287,13 @@ class BVHMotion():
         
         res = self.raw_copy() # 拷贝一份，不要修改原始数据
         
-        # 比如说，你可以这样调整第frame_num帧的根节点平移
-        offset = target_translation_xz - res.joint_position[frame_num, 0, [0,2]]
-        res.joint_position[:, 0, [0,2]] += offset
-        
-        r_y, r_xz = res.decompose_rotation_with_yaxis(res.joint_rotation[frame_num, 0])
-        
         # Method 1, matrix, wrong
         # target_facing_direction_z = utils.get_unit_vector([target_facing_direction_xz[0], 0, target_facing_direction_xz[1]])
         # target_facing_direction_x = utils.get_unit_vector(np.cross([0,1,0], target_facing_direction_z))
         # target_facing_direction_matrix = [target_facing_direction_x, 
         #                                 [0,1,0], 
         #                                 target_facing_direction_z]
-        # R0 = R.from_matrix(target_facing_direction_matrix)
-        # print(R0.as_matrix())
+        # r_0 = R.from_matrix(target_facing_direction_matrix)
         
         # Method 2, calculate angle with R.from_euler("Y"), correct 
         # sin_theta_xz = np.cross(target_facing_direction_xz, np.array([0, 1])) / np.linalg.norm(target_facing_direction_xz)
@@ -299,27 +301,52 @@ class BVHMotion():
         # theta = np.arccos(cos_theta_xz)
         # if sin_theta_xz < 0:
         #     theta = 2 * np.pi - theta
-        # R0 = R.from_euler("Y", theta, degrees=False)
-        # print(R0.as_matrix())
-
+        # r_0 = R.from_euler("Y", theta, degrees=False)
+            
+        # !- 旋转
+        # R_i = R_0 * R_1_t * R_1_i
+        # R_0 is the original rotation (current/base rotaion when transitioning to a frame)
+        # R_1_t is transpose of local rotation of transition frame
+        # 第一项就是基础项
+        # 第二项看成坐标系信息，第二和第三项相乘就是相对旋转偏移量
+        
+        # 这里的R_0和t_0就是提供的参数，target_trans_xz和target_facing_dir_xz
+        # R_1其实是 joint_rotation[frame_num]
+        # 
+        # # r_y 是frame_num时刻的y轴旋转
+        # r_y_t * r_i 是将r_i中的y轴旋转去掉
+        # r_0 * r_y_t * r_i 是r_i从frame_num开始 在r_0坐标系下的旋转
+        
         # Method 3, rotate around y-axis by theta, uses previous util rotation-matrix function, correct
         cos_theta_xz = np.dot(target_facing_direction_xz, np.array([0, 1])) / np.linalg.norm(target_facing_direction_xz)
         theta = np.arccos(cos_theta_xz)
         r_0 = R.from_matrix(utils.get_rotation_matrix_by_angle([0,1,0], theta))
-        # print(r_0.as_matrix())
-            
-        # R_i = R_0 * R_1_t * R_1_i
-        # R_0 is the original rotation (current/base rotaion when transitioning to a frame)
-        # R_1_t is transpose of local rotation of transition frame
-        # 如果把第二项看成坐标系信息，第三项就是相对旋转
-        # 第一项就是基础项
         
-        # 这里的R_0和t_0就是提供的参数，target_trans_xz和target_facing_dir_xz
-        # R_1其实是 joint_rotation[frame_num]
-        
+        r_y, r_xz = res.decompose_rotation_with_yaxis(res.joint_rotation[frame_num, 0])
         res.joint_rotation[:, 0] = R.as_quat(r_0 *
                                              R.from_quat(r_y).inv() * 
                                              R.from_quat(res.joint_rotation[:, 0]))
+        
+        # !- 位移
+        offset = target_translation_xz - res.joint_position[frame_num, 0, [0,2]]
+        res.joint_position[:, 0, [0,2]] += offset
+        
+        # Method 2: Motion transitioning
+        for i in range(len(res.joint_position)):
+            t_0_i = res.joint_position[i,0]
+            t_0 = res.joint_position[frame_num,0]
+            
+            y = res.joint_position[frame_num,0][1]
+            
+            # Set x,z coord
+            tmp_1 = t_0_i - t_0
+            
+            # r_0 * r_1_t * (t_1_i - t_1) + t_0
+            t_i = (r_0 * R.from_quat(r_y).inv()).apply(tmp_1) + t_0
+            
+            # Set y coord
+            res.joint_position[i,0] = [t_i[0], y, t_i[2]]
+        
         
         # Method 1: forward-kinematics
         # trajectory_position = np.empty_like(res.joint_position)
@@ -328,19 +355,8 @@ class BVHMotion():
         #     if i == 0:
         #         trajectory_position[i,0] = res.joint_position[i,0]
         #     else:
-        #         trajectory_position[i,0] = trajectory_position[i-1,0] + (R0 * R.from_quat(Ry).inv()).apply(res.joint_position[i,0]-res.joint_position[i-1,0])
+        #         trajectory_position[i,0] = trajectory_position[i-1,0] + (r_0 * R.from_quat(Ry).inv()).apply(res.joint_position[i,0]-res.joint_position[i-1,0])
         # res.joint_position[:,0] = trajectory_position[:,0]
-        
-        # Method 2: Motion transitioning
-        for i in range(len(res.joint_position)):
-            y = res.joint_position[frame_num,0][1]
-            
-            # Set x,z coord
-            tmp_1 = res.joint_position[i,0] - res.joint_position[frame_num,0]
-            tmp_2 = (r_0 * R.from_quat(r_y).inv()).apply(tmp_1) + res.joint_position[frame_num,0]
-            
-            # Set y coord
-            res.joint_position[i,0] = [tmp_2[0],y,tmp_2[2]]
             
         return res
 

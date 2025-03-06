@@ -38,6 +38,7 @@ class KeyAndPad():
             self.input_vel[2] = value
         elif axis == 'gait':
             self.gait = value
+        print(value)
             
     def set_gamepad_map(self):
         self.gamepad_map = {
@@ -46,8 +47,8 @@ class KeyAndPad():
         }
         self.viewer.attachInputDevice(self.device, prefix="gamepad")
         self.viewer.taskMgr.add(self.update_gamepad, 'update_gamepad', sort = 1)
-        self.viewer.accept('gamepad-rshoulder', self.key_input, ['gait', 1])
-        self.viewer.accept('gamepad-rshoulder-up', self.key_input, ['gait', 0])
+        # self.viewer.accept('gamepad-rshoulder', self.key_input, ['gait', 1])
+        # self.viewer.accept('gamepad-rshoulder-up', self.key_input, ['gait', 0])
         
     def update_gamepad(self, task):
         self.input_vel[0] = -self.device.findAxis(self.gamepad_map['x']).value
@@ -60,6 +61,7 @@ class KeyAndPad():
         
         right_x = self.device.findAxis(InputDevice.Axis.right_x).value
         right_y = self.device.findAxis(InputDevice.Axis.right_y).value
+        self.gait = min(1, max(0, math.sqrt(self.input_vel[0]**2 + self.input_vel[1]**2 + self.input_vel[2]**2)))
         self.viewer.cameractrl.updateGamepad(right_x, right_y, task)
         return task.cont
     
@@ -200,6 +202,13 @@ class Controller:
         self.init_key_input()
         self.halflife = 0.27
         self.move_speed = np.array([1.75, 1.5, 1.25])
+        
+        # TODO:
+        self.recorded_vel = []
+        self.recorded_avel = []
+        self.recorded_pos = []
+        self.recorded_rot = []
+
     @property
     def node(self):
         return self._node
@@ -326,7 +335,27 @@ class Controller:
         self.line.set_color(240/255,31/255,141/255,0.1)
         self.line.setThickness(3)
         positions = [np.array(self.futures[i].get_pos()) for i in range(self.future_step)]
-        self.line.moveTo(*positions[0])
+        
+        # Append last
+        while len(self.recorded_pos) <= 121:
+            self.recorded_vel.append(self.future_vel[0])
+            self.recorded_avel.append(self.future_avel[0])
+            self.recorded_pos.append(positions[0])
+            self.recorded_rot.append(self.future_rot[0])
+        
+        if len(self.recorded_pos) > 121:
+            # Remove first
+            self.recorded_vel.pop(0)
+            self.recorded_avel.pop(0)
+            self.recorded_pos.pop(0)
+            self.recorded_rot.pop(0)
+            
+            self.line.moveTo(*self.recorded_pos[0])
+            for i in range(len(self.recorded_pos)):
+                if i % 20 == 0:
+                    # print(self.recorded_pos)
+                    self.line.drawTo(self.recorded_pos[i][0], self.recorded_pos[i][1], self.recorded_pos[i][2])
+            
         for i in positions[1:]:
             self.line.drawTo(i[0], i[1], i[2])
         self.geom.remove_all_geoms()
@@ -360,7 +389,6 @@ class Controller:
     
     def get_desired_state(self):
         return self.future_pos, self.future_rot, self.future_vel, self.future_avel, self.gait
-    
 def main():
     viewer = SimpleViewer()
     viewer.show_axis_frame()

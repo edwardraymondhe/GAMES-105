@@ -307,20 +307,22 @@ class SimpleViewer(ShowBase):
         if end_effector:
             tex = self.create_texture([0,1,0,1], f"joint{link_id}_tex")
             box.setTexture(tex, 1)
-        box.setScale(0.01,0.01,0.01)
+        box_scale = 0.03
+        box.setScale(box_scale, box_scale, box_scale)
         node.setPos(self.render, *position)
         return node
     
     def create_link(self, link_id, position, scale, rot):
         # create a link
-        box = self.loader.loadModel("material/GroundScene.egg")
+        # Point-7: Hide the connected boxes because network's rotation output is a mess, don't know if original cpp version is working or not.
+        # box = self.loader.loadModel("material/GroundScene.egg")
         node = self.render.attachNewNode(f"link{link_id}")
-        box.reparentTo(node)
+        # box.reparentTo(node)
         
         # add texture
-        box.setTextureOff(1)
-        box.setTexture(self.tex,1)
-        box.setScale(*scale)
+        # box.setTextureOff(1)
+        # box.setTexture(self.tex,1)
+        # box.setScale(*scale)
         
         node.setPos(self.render, *position)
         if rot is not None:

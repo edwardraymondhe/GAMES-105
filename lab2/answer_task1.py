@@ -390,7 +390,6 @@ def blend_two_motions(bvh_motion1, bvh_motion2, alpha):
         k = min(int(i/alpha_count * (m2_count)), m2_count-1)
         
         res.joint_position[i] = (1 - alpha[i]) * bvh_motion1.joint_position[j] + alpha[i] * bvh_motion2.joint_position[k]
-        
         for joint_idx in range(len(bvh_motion1.joint_rotation[0])):
             # 四元数的乘积不是直接相乘
             # 先把四元数变成 [w, v]
@@ -410,14 +409,12 @@ def blend_two_motions(bvh_motion1, bvh_motion2, alpha):
                 
             theta_q = np.arccos(cos_theta_q)
             sin_theta_q = np.sin(theta_q)
-            
             if np.sin(theta_q) != 0:
                 r_1_q = (np.sin((1 - alpha[i]) * theta_q) / sin_theta_q) * j1_quat
                 r_2_q = (np.sin(alpha[i] * theta_q) / sin_theta_q) * j2_quat
                 r_q = r_1_q + r_2_q
             else:
                 r_q = r_2_q
-            
             res.joint_rotation[i][joint_idx] = r_q
 
             # Method 2, euler angles
@@ -447,6 +444,9 @@ def build_loop_motion(bvh_motion):
     return build_loop_motion(res)
 
 # part4
+# !- 结合了 part1 和 part2
+# part1负责拼接两段过渡点的旋转和位移
+# part2负责混合动作
 def concatenate_two_motions(bvh_motion1: BVHMotion, bvh_motion2: BVHMotion, mix_frame1: int, mix_time: int):
     '''
     将两个bvh动作平滑地连接起来，mix_time表示用于混合的帧数
@@ -470,6 +470,7 @@ def concatenate_two_motions(bvh_motion1: BVHMotion, bvh_motion2: BVHMotion, mix_
     # Align bvh2 with bvh1's mixing frame
     bvh_motion2_ry, _ = bvh_motion2.decompose_rotation_with_yaxis(res.joint_rotation[mix_frame1,0])
     bvh_motion2_ry = utils.get_unit_vector([bvh_motion2_ry[1],bvh_motion2_ry[3]])
+    # !- 将bvh2的旋转和位移对齐到bvh1的混合帧(mix_frame1)
     bvh_motion2 = bvh_motion2.translation_and_rotation(0, res.joint_position[mix_frame1,0,[0,2]], np.array(bvh_motion2_ry))
     
     joint_position = []

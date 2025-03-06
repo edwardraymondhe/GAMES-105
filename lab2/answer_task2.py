@@ -35,6 +35,7 @@ class CharacterController():
         self.crouched_amount = 0
         self.crouched_target = 0
         self.responsive = 0
+        self.extra_joint_smooth = 0.5
 
         # PFNN standards
         self.joint_positions_g = np.zeros((JOINT_NUM, 3))
@@ -260,8 +261,8 @@ class CharacterController():
             vel_g = R.from_quat(root_rotation_g).apply(Yp[OVEL + i*3: OVEL + i*3 + 3])
             
             # Point-3: Checks the impact of velocity
-            self.joint_positions_g[i] = ((self.joint_positions_g[i] + vel_g) + pos_g) * 0.5
-            # self.joint_positions_g[i] = (self.joint_positions_g[i] + pos_g) * 0.5
+            self.joint_positions_g[i] = ((self.joint_positions_g[i] + vel_g) + pos_g) * self.extra_joint_smooth
+            # self.joint_positions_g[i] = (self.joint_positions_g[i] + pos_g) * self.extra_joint_smooth
             self.joint_rotations_g[i] = rot_g
             self.joint_velocities_g[i] = vel_g
         
@@ -287,8 +288,10 @@ class CharacterController():
         
         # 如果是 self.phase = math.pi - self.phase, 会一直正反抽搐, 说明确实是起到用处的
         # Point-1: see phase is rotating the joints smoothly, so knows phase is working
-        stand_amount = math.pow(1.0 - trajectory_gait[int(TRAJECTORY_LENGTH/10/2)][1], 0.5)
+        # Point-8: stand amount was incorrect and set to gait.walk instead of gait.stand
+        stand_amount = math.pow(1.0 - trajectory_gait[int(TRAJECTORY_LENGTH/10/2)][0], 0.25)
         self.phase = (self.phase + (stand_amount * 0.9 + 0.1) * 2 * math.pi * phase_delta) % (2 * math.pi)
+        print(f"stand_amount: {stand_amount}, phase: {self.phase}")
         
         # endregion
         

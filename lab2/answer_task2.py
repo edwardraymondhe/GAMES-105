@@ -269,12 +269,10 @@ class CharacterController():
         # Forward Kinematics
         counter = 0
         for i in range(JOINT_NUM_SITE):
-            # Point-2: Sees the joints are too far away, but when divided by a large number, the positions are in place.
             if 'end' not in joint_name[i].lower():
-                # if 'root' in joint_name[i].lower():
-                    # joint_translation[i] = root_position_g
-                # else:
-                joint_translation[i] = self.joint_positions_g[counter] / 65.0
+                # Point-2: Sees the joints are too far away, but when divided by a large number, the positions are in place.
+                # Point-10: Output local positions of pfnn scale differently than games105, need to scale and add root_position back
+                joint_translation[i] = (self.joint_positions_g[counter] - root_position_g) / 65.0 + root_position_g
                 joint_orientation[i] = self.joint_rotations_g[counter]
                 counter += 1
             else:

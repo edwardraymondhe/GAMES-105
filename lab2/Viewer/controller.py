@@ -208,6 +208,7 @@ class Controller:
         self.recorded_avel = []
         self.recorded_pos = []
         self.recorded_rot = []
+        self.recorded_gait = []
 
     @property
     def node(self):
@@ -317,6 +318,7 @@ class Controller:
         self.future_vel = np.array(self.future_vel).reshape(-1, 3)
         self.future_avel[0] = self.avel.copy()
         self.future_avel = np.array(self.future_avel).reshape(-1, 3)
+        self.future_gait = [[1.0-self.gait, self.gait, 0.0, 0.0, 0.0, 0.0]] * self.future_step
         
         rotation_trajectory = rotation_trajectory[...,[3,0,1,2]]
         for i in range(self.future_step):
@@ -342,6 +344,7 @@ class Controller:
             self.recorded_avel.append(self.future_avel[0])
             self.recorded_pos.append(positions[0])
             self.recorded_rot.append(self.future_rot[0])
+            self.recorded_gait.append(self.future_gait[0])
         
         if len(self.recorded_pos) > 121:
             # Remove first
@@ -349,6 +352,7 @@ class Controller:
             self.recorded_avel.pop(0)
             self.recorded_pos.pop(0)
             self.recorded_rot.pop(0)
+            self.recorded_gait.pop(0)
             
             self.line.moveTo(*self.recorded_pos[0])
             for i in range(len(self.recorded_pos)):

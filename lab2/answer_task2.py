@@ -165,9 +165,8 @@ class CharacterController():
         trajectory_rot = np.concatenate((np.array([controller.recorded_rot[i] for i in range(len(controller.recorded_rot) - 1) if i % 20 == 0]), controller.future_rot), axis=0)
         trajectory_vel = np.concatenate((np.array([controller.recorded_vel[i] for i in range(len(controller.recorded_vel) - 1) if i % 20 == 0]), controller.future_vel), axis=0)
         trajectory_avel = np.concatenate((np.array([controller.recorded_avel[i] for i in range(len(controller.recorded_avel) - 1) if i % 20 == 0]), controller.future_avel), axis=0)
-        # trajectory_gait = [[0.0, 1.0, 0.0, 0.0, 0.0, 0.0]] * 12
-        trajectory_gait = [[1.0-current_gait, current_gait, 0.0, 0.0, 0.0, 0.0]] * 12
-        print(trajectory_gait[6])
+        # Point-9: Gait is recorded normally not dummy 
+        trajectory_gait = np.concatenate((np.array([controller.recorded_gait[i] for i in range(len(controller.recorded_gait) - 1) if i % 20 == 0]), controller.future_gait), axis=0)
         # endregion
         
         # region 准备网络输入

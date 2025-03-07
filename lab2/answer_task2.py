@@ -1,6 +1,9 @@
 # 以下部分均为可更改部分
 
 from answer_task1 import *
+import sys
+sys.path.append("..//")
+import utils
 
 import math
 import numpy as np
@@ -120,7 +123,7 @@ class CharacterController():
         角色状态实际上是一个tuple, (joint_name, joint_translation, joint_orientation),为你在update_state中返回的三个值
         你可以更新他们,并返回一个新的角色状态
         '''
-        # print("--------------------------------")
+        print("--------------------------------")
         
         # 帧窗口根关节的xz坐标与中间帧(第61帧)作为轨迹位置root_possxz,     12x2 = 24
         # 窗口根关节的xz方向作为人体朝向root_dirxz,                      12x2 = 24
@@ -173,18 +176,41 @@ class CharacterController():
         # 输入
         # X Input Dimension = 276
         Xp = [0] * 276
+        
+        # Input Joint Previous Positions / Velocities / Rotations
+        # root_position_g = trajectory_pos[int(TRAJECTORY_LENGTH/10/2)]
+        # root_rotation_g = trajectory_rot[int(TRAJECTORY_LENGTH/10/2)]
+        # prev_root_position_g = trajectory_pos[int(TRAJECTORY_LENGTH/10/2-1)]
+        # prev_root_rotation_g = trajectory_rot[int(TRAJECTORY_LENGTH/10/2-1)]
+        # Point-6: different representations of root_position & root_rotation
+        root_position_g = controller.future_pos[0]
+        root_rotation_g = controller.future_rot[0]
+        prev_root_position_g = controller.recorded_pos[-1]
+        prev_root_rotation_g = controller.recorded_rot[-1]
+        
+        trajectory_pos_scaler = 65.0
+        
         for i in range(0, TRAJECTORY_LENGTH, 10):
             # Point-5: change from 12 -> 120 and with step of 10
             w = int(TRAJECTORY_LENGTH / 10)
+            
             # Input Trajectory Positions / Directions
             # 1-12: 轨迹12帧 根关节的x坐标
             # 13-24: 轨迹12帧 根关节的z坐标
             # 25-36: 轨迹12帧 根关节的x方向
             # 37-48: 轨迹12帧 根关节的z方向
-            Xp[int((w*0)+i/10)] = trajectory_pos[int(i/10)][0]
-            Xp[int((w*1)+i/10)] = trajectory_pos[int(i/10)][2]
-            Xp[int((w*2)+i/10)] = trajectory_vel[int(i/10)][0]
-            Xp[int((w*3)+i/10)] = trajectory_vel[int(i/10)][2]
+            # Point-11: Trajectory is in relative coord not absolute coord
+            # pos = trajectory_pos[int(i/10)]
+            # dir = trajectory_vel[int(i/10)]
+            pos = (trajectory_pos[int(i/10)] - root_position_g) * trajectory_pos_scaler
+            dir = utils.get_unit_vector(trajectory_vel[int(i/10)])
+            Xp[int((w*0)+i/10)] = pos[0]
+            Xp[int((w*1)+i/10)] = pos[2]
+            Xp[int((w*2)+i/10)] = dir[0]
+            Xp[int((w*3)+i/10)] = dir[2]
+            print(f"Trajectory-{i} Pos: {pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}")
+            print(f"Trajectory-{i} Dir: {dir[0]:.6f} {dir[1]:.6f} {dir[2]:.6f}")
+
             
             # Input Trajectory Gaits
             # 49-120: 轨迹12帧 6种步态参数12*6
@@ -197,16 +223,7 @@ class CharacterController():
         
         # 121-180: 当前关节的局部位置，注意高度已经减去了地形均值 20*3=60
         # 181-240: 当前关节的局部速度20*3
-        # Input Joint Previous Positions / Velocities / Rotations
-        # root_position_g = trajectory_pos[int(TRAJECTORY_LENGTH/10/2)]
-        # root_rotation_g = trajectory_rot[int(TRAJECTORY_LENGTH/10/2)]
-        # prev_root_position_g = trajectory_pos[int(TRAJECTORY_LENGTH/10/2-1)]
-        # prev_root_rotation_g = trajectory_rot[int(TRAJECTORY_LENGTH/10/2-1)]
-        # Point-6: different representations of root_position & root_rotation
-        root_position_g = controller.future_pos[0]
-        root_rotation_g = controller.future_rot[0]
-        prev_root_position_g = controller.recorded_pos[-1]
-        prev_root_rotation_g = controller.recorded_rot[-1]
+        
         
         for i in range(JOINT_NUM):
             o = int(TRAJECTORY_LENGTH / 10 * 10)
@@ -288,7 +305,7 @@ class CharacterController():
         # Point-8: stand amount was incorrect and set to gait.walk instead of gait.stand
         stand_amount = math.pow(1.0 - trajectory_gait[int(TRAJECTORY_LENGTH/10/2)][0], 0.25)
         self.phase = (self.phase + (stand_amount * 0.9 + 0.1) * 2 * math.pi * phase_delta) % (2 * math.pi)
-        print(f"stand_amount: {stand_amount}, phase: {self.phase}")
+        # print(f"stand_amount: {stand_amount}, phase: {self.phase}")
         
         # endregion
         
